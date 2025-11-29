@@ -17,7 +17,7 @@ router = APIRouter(prefix="/site", tags=["站点"])
 
 
 # Site start date (you can change this)
-SITE_START_DATE = datetime(2025, 1, 1)
+SITE_START_DATE = datetime(2025, 11, 27)
 
 
 @router.get("/info", response_model=ResponseModel[SiteStats])
