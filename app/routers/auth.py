@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
+import logging
 
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token
@@ -12,6 +13,7 @@ from app.schemas.common import ResponseModel
 import random
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+logger = logging.getLogger(__name__)
 
 # 随机头像生成函数
 def generate_random_avatar() -> str:
@@ -27,9 +29,11 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """用户登录"""
     user = db.query(User).filter(User.username == user_data.username).first()
     if not user or not verify_password(user_data.password, user.hashed_password):
+        logger.warning(f"Login failed for user: {user_data.username}")
         return ResponseModel(code=401, msg="用户名或密码错误")
     
     if not user.is_active:
+        logger.warning(f"Login attempt for inactive user: {user_data.username}")
         return ResponseModel(code=403, msg="账号已被禁用")
     
     # Create token
@@ -37,6 +41,8 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         data={"sub": str(user.id)},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
+    
+    logger.info(f"User logged in: {user.username}")
     
     user_info = UserInfo(
         id=user.id,

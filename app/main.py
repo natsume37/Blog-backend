@@ -1,17 +1,34 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import time
+import logging
+from contextlib import asynccontextmanager
 from app.core.database import SessionLocal
 from app.models.monitor import VisitLog
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.core.logger import setup_logging
 from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog
-
+from app.tasks import start_scheduler, stop_scheduler
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Setup logging
+setup_logging()
+logger = logging.getLogger("app")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Application startup")
+    # Start scheduler
+    start_scheduler()
+    yield
+    # Stop scheduler
+    stop_scheduler()
+    logger.info("Application shutdown")
 
 def get_location_from_ip(ip: str):
     """
@@ -28,7 +45,8 @@ app = FastAPI(
     description="博客后端 API",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 
@@ -52,8 +70,8 @@ async def log_visit(request: Request, call_next):
     if request.url.path.startswith(settings.API_V1_PREFIX) and request.method != "OPTIONS":
         # Exclude admin/monitor APIs to avoid noise
         if "/monitor/" not in request.url.path and "/admin/" not in request.url.path:
+            db = SessionLocal()
             try:
-                db = SessionLocal()
                 # Simple IP resolution (Mock for now, or use a library if available)
                 ip = request.client.host if request.client else "unknown"
                 
@@ -65,19 +83,29 @@ async def log_visit(request: Request, call_next):
                     location=f"{province} {city}".strip(),
                     province=province,
                     city=city,
-                    path=request.url.path,
+                    path=request.url.path[:255],
                     method=request.method,
                     status_code=response.status_code,
-                    user_agent=request.headers.get("user-agent", ""),
+                    user_agent=request.headers.get("user-agent", "")[:500],
                     process_time=process_time
                 )
                 db.add(log)
                 db.commit()
-                db.close()
             except Exception as e:
-                print(f"Failed to log visit: {e}")
+                logger.error(f"Failed to log visit: {e}", exc_info=True)
+            finally:
+                db.close()
                 
     return response
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"message": "Internal Server Error"},
+    )
 
 
 # Include routers

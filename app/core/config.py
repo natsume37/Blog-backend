@@ -1,43 +1,83 @@
+import os
+from pathlib import Path
 from typing import Literal
-
-from pydantic import AnyUrl, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # App
-    # 应用基础配置
+    # ===========================
+    # 基础配置 (Base)
+    # ===========================
     APP_NAME: str = Field(default='FastAPI AI Backend', description='应用名称')
     APP_VERSION: str = Field(default='1.0.0', description='应用版本')
-    ENVIRONMENT: Literal['development', 'staging', 'production'] = Field(default='development', description='运行环境')
+    ENVIRONMENT: Literal['development', 'staging', 'production'] = Field(
+        default='development', description='运行环境'
+    )
     DEBUG: bool = Field(default=False, description='调试模式')
 
-    # 服务器配置
+    # 项目根目录 (动态获取，指向 my_project/)
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
+    # ===========================
+    # 日志配置 (Logging) - 新增
+    # ===========================
+    LOG_LEVEL: str = Field(default="INFO", description="日志等级: DEBUG/INFO/WARNING/ERROR")
+    LOG_JSON_FORMAT: bool = Field(default=False, description="是否开启生产环境JSON日志格式")
+    LOG_DIR: str = Field(default="logs", description="日志文件夹名称")
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
+    LOG_BACKUP_COUNT: int = 10  # 保留10个文件
+
+    # ===========================
+    # Redis 配置 (Redis)
+    # ===========================
+    REDIS_HOST: str = Field(default='localhost', description='Redis主机')
+    REDIS_PORT: int = Field(default=6379, description='Redis端口')
+    REDIS_DB: int = Field(default=0, description='Redis数据库索引')
+    REDIS_PASSWORD: str | None = Field(default=None, description='Redis密码')
+
+    # ===========================
+    # 定时任务配置 (Scheduler)
+    # ===========================
+    SYNC_VIEWS_INTERVAL_MINUTES: int = Field(default=10, description='文章浏览量同步周期(分钟)')
+
+    # ===========================
+    # 服务器配置 (Server)
+    # ===========================
     HOST: str = Field(default='0.0.0.0', description='服务器主机')
     PORT: int = Field(default=8000, description='服务器端口')
-    # Pydantic配置
+    API_V1_PREFIX: str = Field(default="/api/v1", description="API 路径前缀")
 
-    # 数据库配置
-    DATABASE_URL: str = Field(description='数据库连接URL')
+    # ===========================
+    # 数据库配置 (Database)
+    # ===========================
+    DATABASE_URL: str = Field(default="sqlite:///./test.db", description='数据库连接URL')
     DATABASE_POOL_SIZE: int = Field(default=20, description='数据库连接池大小')
     DATABASE_MAX_OVERFLOW: int = Field(default=10, description='数据库最大溢出连接')
-    # JWT
-    SECRET_KEY: str = Field(default="your-secret-key-change-in-production", description='JWT密钥')
+
+    # ===========================
+    # 安全配置 (Security)
+    # ===========================
+    SECRET_KEY: str = Field(default="insecure-key-change-me", description='JWT密钥')
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
-    # url前缀设置 API_V1_PREFIX: str = "/api/v1"
-    API_V1_PREFIX: str = Field("/api/v1", description="API 路径前缀")
-    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', case_sensitive=True, extra='ignore')
+
+    # ===========================
+    # Pydantic 配置
+    # ===========================
+    # 允许从 .env 文件读取，同时忽略多余字段
+    model_config = SettingsConfigDict(
+        env_file='.env',
+        env_file_encoding='utf-8',
+        case_sensitive=True,
+        extra='ignore'
+    )
 
     @property
     def is_development(self) -> bool:
-        """是否为开发环境"""
         return self.ENVIRONMENT == 'development'
 
     @property
     def is_production(self) -> bool:
-        """是否为生产环境"""
         return self.ENVIRONMENT == 'production'
 
     @property
@@ -46,31 +86,36 @@ class Settings(BaseSettings):
         return str(self.DATABASE_URL).replace('+asyncpg', '')
 
 
-# 根据环境加载不同配置文件
+# ===========================
+# 加载逻辑
+# ===========================
 def get_settings() -> Settings:
-    import os
-    import pathlib
+    """
+    根据 ENVIRONMENT 环境变量加载不同的配置文件
+    优先级: 系统环境变量 > .env.prod/.dev > .env > 默认值
+    """
+    # 1. 先确定环境，默认 development
+    env_mode = os.getenv('ENVIRONMENT', 'development')
 
-    # 项目根目录（假设 settings.py 在 app/core/）
-    BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent  # 项目根 AI
+    # 2. 确定根目录
+    base_dir = Path(__file__).resolve().parent.parent.parent
 
-    env = os.getenv('ENVIRONMENT', 'development')
-    # print(f'[DEBUG] 系统环境变量 ENVIRONMENT = {env}')
-
-    # 使用绝对路径
-    env_file_map = {
-        'development': BASE_DIR / '.env.dev',
-        'staging': BASE_DIR / '.env.staging',
-        'production': BASE_DIR / '.env.prod',
+    # 3. 映射环境文件
+    env_files = {
+        'development': '.env.dev',
+        'staging': '.env.staging',
+        'production': '.env.prod',
     }
-    env_file = env_file_map.get(env, BASE_DIR / '.env')
-    # print(f'[DEBUG] 即将加载配置文件: {env_file}')
 
-    # 强制打印文件是否存在
-    print(f'[DEBUG] 文件是否存在？: {env_file.exists()} -> {env_file.resolve()}')
+    # 4. 确定目标文件路径
+    target_env_file = base_dir / env_files.get(env_mode, '.env')
 
-    return Settings(_env_file=env_file)
+    # print(f"Loading config from: {target_env_file} (Exists: {target_env_file.exists()})")
+
+    # 5. 实例化 Settings，传入 _env_file 参数
+    # 注意：如果文件不存在，Pydantic 会默认忽略或仅使用系统环境变量
+    return Settings(_env_file=target_env_file)
 
 
-# 全局配置实例
+# 全局单例
 settings = get_settings()

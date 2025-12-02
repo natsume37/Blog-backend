@@ -5,6 +5,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_admin, get_current_user_optional
+from app.core.cache import redis_client
 from app.models.article import Article, Category, Tag, article_tags, ArticleLike
 from app.models.user import User
 from app.schemas.article import (
@@ -137,6 +138,10 @@ def update_article(
         article.tags = tags
         
     db.commit()
+    
+    # Invalidate cache
+    redis_client.delete(f"article:{article_id}")
+    
     return ResponseModel(code=200, msg="更新成功")
 
 
@@ -153,6 +158,11 @@ def delete_article(
         
     db.delete(article)
     db.commit()
+    
+    # Invalidate cache
+    redis_client.delete(f"article:{article_id}")
+    redis_client.delete(f"article:{article_id}:views")
+    
     return ResponseModel(code=200, msg="删除成功")
 
 
@@ -225,38 +235,69 @@ def get_articles(
 @router.get("/{article_id}", response_model=ResponseModel[ArticleDetail])
 def get_article(article_id: int, db: Session = Depends(get_db)):
     """获取文章详情"""
+    # Try cache first
+    cache_key = f"article:{article_id}"
+    cached_data = redis_client.get(cache_key)
+    
+    if cached_data:
+        # Increment view count in Redis
+        view_count_key = f"article:{article_id}:views"
+        new_views = redis_client.incr(view_count_key)
+        
+        # Update the cached data's view count
+        cached_data['viewCount'] = new_views
+        
+        return ResponseModel(
+            code=200,
+            data=ArticleDetail(**cached_data)
+        )
+    
+    # If not in cache, query DB
     article = db.query(Article).filter(Article.id == article_id).first()
     
     if not article:
         return ResponseModel(code=404, msg="文章不存在")
     
-    # Increment view count
-    article.view_count += 1
-    db.commit()
+    # Handle view count
+    # We use Redis to track real-time views
+    view_count_key = f"article:{article_id}:views"
+    
+    # If key doesn't exist, initialize from DB
+    if not redis_client.get_client().exists(view_count_key):
+        redis_client.get_client().set(view_count_key, article.view_count)
+    
+    # Increment in Redis
+    new_views = redis_client.incr(view_count_key)
     
     category_name = article.category.name if article.category else ""
     tags = [TagResponse(id=tag.id, name=tag.name, color=tag.color, created_at=tag.created_at) for tag in article.tags]
     
+    detail_data = ArticleDetail(
+        id=article.id,
+        title=article.title,
+        summary=article.summary or "",
+        content=article.content,
+        cover=article.cover or "",
+        category_id=article.category_id,
+        categoryName=category_name,
+        tags=tags,
+        viewCount=new_views,
+        commentCount=article.comment_count,
+        likeCount=article.like_count,
+        is_published=article.is_published,
+        is_top=article.is_top,
+        is_recommend=article.is_recommend,
+        createdAt=article.created_at,
+        updatedAt=article.updated_at
+    )
+    
+    # Cache the detail data (excluding view count which changes often, or include it and update it)
+    # We cache the structure. When reading, we overlay the dynamic view count.
+    redis_client.set(cache_key, detail_data.model_dump(), expire=300) # Cache for 5 mins
+    
     return ResponseModel(
         code=200,
-        data=ArticleDetail(
-            id=article.id,
-            title=article.title,
-            summary=article.summary or "",
-            content=article.content,
-            cover=article.cover or "",
-            category_id=article.category_id,
-            categoryName=category_name,
-            tags=tags,
-            viewCount=article.view_count,
-            commentCount=article.comment_count,
-            likeCount=article.like_count,
-            is_published=article.is_published,
-            is_top=article.is_top,
-            is_recommend=article.is_recommend,
-            createdAt=article.created_at,
-            updatedAt=article.updated_at
-        )
+        data=detail_data
     )
 
 

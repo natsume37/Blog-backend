@@ -6,6 +6,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.cache import redis_client
 from app.models.article import Article, Tag
 from app.models.site import SiteInfo
 from app.models.user import User
@@ -49,6 +50,12 @@ def get_site_info(db: Session = Depends(get_db)):
 @router.get("/config", response_model=ResponseModel[SiteConfig])
 def get_site_config(db: Session = Depends(get_db)):
     """获取站点配置"""
+    # Try cache first
+    cache_key = "site_config"
+    cached_config = redis_client.get(cache_key)
+    if cached_config:
+        return ResponseModel(code=200, data=SiteConfig(**cached_config))
+
     # Helper to get value or default
     def get_val(key, default):
         item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
@@ -69,6 +76,9 @@ def get_site_config(db: Session = Depends(get_db)):
         noticeText=get_val("notice_text", "欢迎访问我的个人博客！这里记录了我的学习笔记和生活感悟。本站持续更新中..."),
         aboutContent=get_val("about_content", "# 关于我\n\n这里是我的个人介绍...")
     )
+    
+    # Cache the result (1 hour)
+    redis_client.set(cache_key, config.model_dump(), expire=3600)
     
     return ResponseModel(code=200, data=config)
 
@@ -103,5 +113,8 @@ def update_site_config(
     set_val("about_content", config.aboutContent)
     
     db.commit()
+    
+    # Invalidate cache
+    redis_client.delete("site_config")
     
     return ResponseModel(code=200, data=config, msg="配置已更新")

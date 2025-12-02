@@ -4,11 +4,15 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
+import logging
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
+
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
@@ -76,6 +80,7 @@ def get_current_admin(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
     if not current_user.is_admin:
+        logger.warning(f"User {current_user.username} attempted to access admin area without privileges")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="The user doesn't have enough privileges"
         )
