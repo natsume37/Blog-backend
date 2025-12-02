@@ -16,19 +16,31 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
+            # 遇到错误立即停止
+            set -e
+
+            # 1. 进入项目目录
             cd ~/work/blog/Blog-backend
-            
-            # 拉取最新代码
-            git pull origin main
-            
-            # 如果 .venv 不存在，使用 uv 创建虚拟环境
-            if [ ! -d ".venv" ]; then
-              echo "Creating virtual environment..."
-              uv venv
+
+            # 2. 强制同步代码 (关键修改)
+            # git fetch 获取最新记录
+            # git reset --hard 强制将本地代码重置为远程 main 分支的状态
+            # 注意：这会丢弃服务器上所有未提交的本地修改！
+            git fetch --all
+            git reset --hard origin/main
+
+            # 3. 确保 uv 已安装
+            if ! command -v uv &> /dev/null; then
+                echo "Installing uv..."
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+                source $HOME/.cargo/env
             fi
-            
-            # 使用 uv 同步依赖（自动激活虚拟环境）
+
+            # 4. 同步依赖
+            echo "Syncing dependencies..."
             uv sync
-            
-            # 重启服务
-            sudo systemctl restart fastapi-blog.service
+
+            # 5. 重启服务 (Root 用户不需要 sudo)
+            systemctl restart fastapi-blog.service
+
+            echo "Deployment successful!"
