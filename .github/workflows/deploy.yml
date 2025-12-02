@@ -1,44 +1,34 @@
-name: Deploy to Server
+name: Deploy Backend
 
 on:
   push:
-    branches:
-      - main  # 当推送到 main 分支时触发
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Deploy to Server via SSH
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          # 1. 进入项目目录
-          cd ~/work/blog/Blog-backend
-          
-          # 2. 拉取最新代码 (假设你已经 clone 过了，如果没有，第一次需要手动 git clone)
-          # 如果是第一次，请先在服务器运行: git clone <你的仓库地址> .
-          git pull origin main
-          
-          # 3. 更新依赖 (使用 uv 或 pip)
-          # 假设你安装了 uv，如果没有，改为 pip install -r requirements.txt
-          source .venv/bin/activate
-          uv sync  # 或者 pip install -r requirements.txt
-          
-          # 4. 运行数据库迁移 (如果有)
-          # alembic upgrade head 
-          
-          # 5. 重启服务
-          # 假设你使用 systemd 管理服务 (推荐)
-          sudo systemctl restart fastapi-blog.service
-          
-          # 或者如果你是用 nohup/screen 跑的 (不推荐生产环境)，你需要杀掉进程再启动
-          # pkill -f "uvicorn" || true
-          # nohup uv run main.py > app.log 2>&1 &
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd ~/work/blog/Blog-backend
+            
+            # 拉取最新代码
+            git pull origin main
+            
+            # 如果 .venv 不存在，使用 uv 创建虚拟环境
+            if [ ! -d ".venv" ]; then
+              echo "Creating virtual environment..."
+              uv venv
+            fi
+            
+            # 使用 uv 同步依赖（自动激活虚拟环境）
+            uv sync
+            
+            # 重启服务
+            sudo systemctl restart fastapi-blog.service
