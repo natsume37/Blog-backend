@@ -121,6 +121,74 @@ def create_comment(
     )
 
 
+# ============ 管理员接口 ============
+
+@router.get("/admin/list", response_model=ResponseModel)
+def get_admin_comments(
+    current: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    is_approved: Optional[bool] = None,
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """获取评论列表（管理员）"""
+    # 基础查询 - 先不加 joinedload
+    base_query = db.query(Comment)
+    
+    if is_approved is not None:
+        base_query = base_query.filter(Comment.is_approved == is_approved)
+    
+    if keyword:
+        base_query = base_query.filter(Comment.content.contains(keyword))
+    
+    # 先获取总数
+    total = base_query.count()
+    
+    # 再加 joinedload 并分页
+    comments = base_query.options(
+        joinedload(Comment.user)
+    ).order_by(Comment.created_at.desc()).offset((current - 1) * size).limit(size).all()
+    
+    # 获取相关文章信息
+    article_ids = [c.content_id for c in comments if c.content_type == 'article']
+    articles = {}
+    if article_ids:
+        article_list = db.query(Article).filter(Article.id.in_(article_ids)).all()
+        articles = {a.id: a for a in article_list}
+
+    records = []
+    for comment in comments:
+        article_title = "未知来源"
+        if comment.content_type == 'article':
+            article = articles.get(comment.content_id)
+            article_title = article.title if article else "文章已删除"
+        elif comment.content_type == 'changelog':
+            article_title = "更新日志"
+        elif comment.content_type == 'message_board':
+            article_title = "留言板"
+
+        records.append(CommentAdminItem(
+            id=comment.id,
+            content=comment.content,
+            article_id=comment.content_id,
+            article_title=article_title,
+            user=build_comment_user(comment.user),
+            is_approved=comment.is_approved,
+            created_at=comment.created_at
+        ))
+    
+    return ResponseModel(
+        code=200,
+        data=PagedData(
+            records=records,
+            total=total,
+            current=current,
+            size=size
+        )
+    )
+
+
 @router.get("/{content_type}/{content_id}", response_model=ResponseModel)
 def get_comments_by_content(
     content_type: str,
@@ -272,59 +340,6 @@ def like_comment(
     db.commit()
     
     return ResponseModel(code=200, msg="点赞成功", data={"like_count": comment.like_count})
-
-
-# ============ 管理员接口 ============
-
-@router.get("/admin/list", response_model=ResponseModel)
-def get_admin_comments(
-    current: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
-    is_approved: Optional[bool] = None,
-    keyword: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin)
-):
-    """获取评论列表（管理员）"""
-    # 基础查询 - 先不加 joinedload
-    base_query = db.query(Comment)
-    
-    if is_approved is not None:
-        base_query = base_query.filter(Comment.is_approved == is_approved)
-    
-    if keyword:
-        base_query = base_query.filter(Comment.content.contains(keyword))
-    
-    # 先获取总数
-    total = base_query.count()
-    
-    # 再加 joinedload 并分页
-    comments = base_query.options(
-        joinedload(Comment.user),
-        joinedload(Comment.article)
-    ).order_by(Comment.created_at.desc()).offset((current - 1) * size).limit(size).all()
-    
-    records = []
-    for comment in comments:
-        records.append(CommentAdminItem(
-            id=comment.id,
-            content=comment.content,
-            article_id=comment.article_id,
-            article_title=comment.article.title if comment.article else "已删除",
-            user=build_comment_user(comment.user),
-            is_approved=comment.is_approved,
-            created_at=comment.created_at
-        ))
-    
-    return ResponseModel(
-        code=200,
-        data=PagedData(
-            records=records,
-            total=total,
-            current=current,
-            size=size
-        )
-    )
 
 
 @router.put("/admin/{comment_id}", response_model=ResponseModel)
