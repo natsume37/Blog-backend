@@ -8,9 +8,12 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.schemas.user import UserCreate, UserLogin, UserInfo, Token, UserUpdate
+from app.schemas.user import UserCreate, UserLogin, UserInfo, Token, UserUpdate, ForgotPasswordRequest, ResetPasswordRequest, UserRegister
 from app.schemas.common import ResponseModel
+from app.core.cache import RedisClient
+from app.core.email import send_reset_password_email, send_register_verification_email
 import random
+import string
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 logger = logging.getLogger(__name__)
@@ -80,9 +83,42 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
     )
 
 
+@router.post("/register/send-code", response_model=ResponseModel)
+def send_register_code(
+    request: ForgotPasswordRequest,  # 复用 ForgotPasswordRequest (只包含 email)
+    db: Session = Depends(get_db)
+):
+    """发送注册验证码"""
+    # Check if email exists
+    if db.query(User).filter(User.email == request.email).first():
+        return ResponseModel(code=400, msg="该邮箱已被注册")
+    
+    # 生成6位验证码
+    code = ''.join(random.choices(string.digits, k=6))
+    
+    # 存入 Redis，有效期 10 分钟
+    redis_client = RedisClient()
+    key = f"register_code:{request.email}"
+    redis_client.set(key, code, expire=600)
+    
+    # 发送邮件
+    if send_register_verification_email(request.email, code):
+        return ResponseModel(code=200, msg="验证码已发送至您的邮箱")
+    else:
+        return ResponseModel(code=500, msg="邮件发送失败，请稍后重试")
+
+
 @router.post("/register", response_model=ResponseModel)
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
+def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """用户注册"""
+    # Verify code
+    redis_client = RedisClient()
+    key = f"register_code:{user_data.email}"
+    saved_code = redis_client.get(key)
+    
+    if not saved_code or saved_code != user_data.code:
+        return ResponseModel(code=400, msg="验证码无效或已过期")
+
     # Check if username exists
     if db.query(User).filter(User.username == user_data.username).first():
         return ResponseModel(code=400, msg="用户名已存在")
@@ -99,11 +135,16 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         email=user_data.email,
         hashed_password=hashed_password,
         nickname=user_data.username,
-        avatar=random_avatar
+        avatar=random_avatar,
+        is_active=True,
+        is_admin=False
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+    
+    # Delete code
+    redis_client.client.delete(key)
     
     return ResponseModel(code=200, msg="注册成功")
 
@@ -149,3 +190,59 @@ def update_profile(
         ),
         msg="更新成功"
     )
+
+
+@router.post("/forgot-password", response_model=ResponseModel)
+def forgot_password(
+    request: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """忘记密码 - 发送验证码"""
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        # 为了安全，即使邮箱不存在也提示发送成功，防止枚举邮箱
+        # 但在开发阶段，为了方便调试，可以返回真实信息，或者这里我们选择返回成功但不实际发送
+        # 实际上，为了用户体验，通常会提示邮箱未注册
+        return ResponseModel(code=404, msg="该邮箱未注册")
+    
+    # 生成6位验证码
+    code = ''.join(random.choices(string.digits, k=6))
+    
+    # 存入 Redis，有效期 10 分钟
+    redis_client = RedisClient()
+    key = f"reset_password_code:{request.email}"
+    redis_client.set(key, code, expire=600)
+    
+    # 发送邮件
+    if send_reset_password_email(request.email, code):
+        return ResponseModel(code=200, msg="验证码已发送至您的邮箱")
+    else:
+        return ResponseModel(code=500, msg="邮件发送失败，请稍后重试")
+
+
+@router.post("/reset-password", response_model=ResponseModel)
+def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """重置密码"""
+    # 验证验证码
+    redis_client = RedisClient()
+    key = f"reset_password_code:{request.email}"
+    saved_code = redis_client.get(key)
+    
+    if not saved_code or saved_code != request.code:
+        return ResponseModel(code=400, msg="验证码无效或已过期")
+    
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        return ResponseModel(code=404, msg="用户不存在")
+    
+    # 更新密码
+    user.hashed_password = get_password_hash(request.new_password)
+    db.commit()
+    
+    # 删除验证码
+    redis_client.client.delete(key)
+    
+    return ResponseModel(code=200, msg="密码重置成功，请重新登录")

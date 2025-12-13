@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # ===========================
+    # 邮件配置 (Email)
+    # ===========================
+    SMTP_HOST: str = Field(default='smtp.example.com', description='SMTP服务器地址')
+    SMTP_PORT: int = Field(default=465, description='SMTP服务器端口')
+    SMTP_USER: str = Field(default='user@example.com', description='SMTP用户名')
+    SMTP_PASSWORD: str = Field(default='password', description='SMTP密码')
+    EMAILS_FROM_EMAIL: str = Field(default='user@example.com', description='发件人邮箱')
+    EMAILS_FROM_NAME: str = Field(default='Blog Admin', description='发件人名称')
+
+    # ===========================
     # Pydantic 配置
     # ===========================
     # 允许从 .env 文件读取，同时忽略多余字段
