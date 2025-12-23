@@ -107,3 +107,13 @@ class ArticleDetail(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CategoryWithArticles(BaseModel):
+    id: int
+    name: str
+    description: str
+    articles: List[ArticleListItem]
+
+    class Config:
+        from_attributes = True

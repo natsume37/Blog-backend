@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -10,7 +10,7 @@ from app.models.article import Article, Category, Tag, article_tags, ArticleLike
 from app.models.user import User
 from app.schemas.article import (
     ArticleListItem, ArticleDetail, CategoryResponse, TagResponse,
-    ArticleCreate, ArticleUpdate, ArticleAdminListItem
+    ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles
 )
 from app.schemas.common import ResponseModel, PagedData
 
@@ -421,3 +421,44 @@ def get_like_status(
         "isLiked": existing_like is not None,
         "likeCount": article.like_count
     })
+
+
+@router.get("/home/categorized", response_model=ResponseModel[List[CategoryWithArticles]])
+def get_home_categorized_articles(db: Session = Depends(get_db)):
+    """获取首页分类文章列表"""
+    # Get all categories
+    categories = db.query(Category).order_by(Category.sort_order).all()
+    
+    data = []
+    for category in categories:
+        # Get top 6 articles for each category
+        articles = db.query(Article).filter(
+            Article.category_id == category.id,
+            Article.is_published == True
+        ).order_by(Article.created_at.desc()).limit(6).all()
+        
+        if not articles:
+            continue
+            
+        article_list = []
+        for article in articles:
+            article_list.append(ArticleListItem(
+                id=article.id,
+                title=article.title,
+                summary=article.summary,
+                cover=article.cover,
+                createTime=article.created_at.strftime("%Y-%m-%d %H:%M:%S") if article.created_at else "",
+                categoryName=category.name,
+                viewCount=article.view_count,
+                commentCount=article.comment_count,
+                likeCount=article.like_count
+            ))
+            
+        data.append(CategoryWithArticles(
+            id=category.id,
+            name=category.name,
+            description=category.description,
+            articles=article_list
+        ))
+        
+    return ResponseModel(code=200, data=data)
