@@ -78,9 +78,9 @@ def upgrade() -> None:
     op.create_foreign_key(None, 'comments', 'users', ['user_id'], ['id'], ondelete='CASCADE')
     op.create_foreign_key(None, 'comments', 'users', ['reply_to_id'], ['id'], ondelete='SET NULL')
     op.create_foreign_key(None, 'comments', 'comments', ['parent_id'], ['id'], ondelete='CASCADE')
-    op.drop_column('comments', 'nickname')
-    op.drop_column('comments', 'email')
-    op.drop_column('comments', 'avatar')
+    # op.drop_column('comments', 'nickname')
+    # op.drop_column('comments', 'email')
+    # op.drop_column('comments', 'avatar')
     # ### end Alembic commands ###
 
 
