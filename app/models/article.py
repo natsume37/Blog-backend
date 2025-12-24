@@ -42,6 +42,12 @@ class Category(Base):
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(255), default="")
     sort_order = Column(Integer, default=0)
+    
+    # New fields for customization
+    banner_url = Column(String(255), nullable=True)
+    quote = Column(String(255), nullable=True)
+    quote_author = Column(String(50), nullable=True)
+    
     created_at = Column(DateTime, server_default=func.now())
     
     # Relationships

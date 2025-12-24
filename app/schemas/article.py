@@ -6,6 +6,9 @@ from pydantic import BaseModel
 class CategoryBase(BaseModel):
     name: str
     description: Optional[str] = ""
+    banner_url: Optional[str] = None
+    quote: Optional[str] = None
+    quote_author: Optional[str] = None
 
 
 class CategoryCreate(CategoryBase):
@@ -17,6 +20,11 @@ class CategoryResponse(CategoryBase):
     sort_order: int
     article_count: int = 0  # 文章数量
     created_at: Optional[datetime] = None
+    
+    # Include new fields in response
+    banner_url: Optional[str] = None
+    quote: Optional[str] = None
+    quote_author: Optional[str] = None
 
     class Config:
         from_attributes = True

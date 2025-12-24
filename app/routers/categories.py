@@ -1,11 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
-
-from app.core.database import get_db
-from app.core.deps import get_current_admin
-from app.models.article import Category, Tag, Article
+from typing import List, Optional
+from app.models.article import Category, Tag, Article, article_tags
 from app.models.user import User
 from app.schemas.article import (
     CategoryResponse, TagResponse, 
@@ -32,7 +29,10 @@ def create_category(
     category = Category(
         name=category_in.name,
         description=category_in.description,
-        sort_order=category_in.sort_order
+        sort_order=category_in.sort_order,
+        banner_url=category_in.banner_url,
+        quote=category_in.quote,
+        quote_author=category_in.quote_author
     )
     db.add(category)
     db.commit()
@@ -54,6 +54,9 @@ def update_category(
     category.name = category_in.name
     category.description = category_in.description
     category.sort_order = category_in.sort_order
+    category.banner_url = category_in.banner_url
+    category.quote = category_in.quote
+    category.quote_author = category_in.quote_author
     db.commit()
     return ResponseModel(code=200, msg="更新成功")
 
@@ -85,14 +88,17 @@ def get_categories(db: Session = Depends(get_db)):
         db.query(Article.category_id, func.count(Article.id))
         .filter(Article.is_published == True)
         .group_by(Article.category_id)
-        .all()
-    )
-    
     data = [CategoryResponse(
         id=c.id,
         name=c.name,
         description=c.description,
         sort_order=c.sort_order,
+        banner_url=c.banner_url,
+        quote=c.quote,
+        quote_author=c.quote_author,
+        article_count=article_counts.get(c.id, 0),
+        created_at=c.created_at
+    ) for c in categories]order,
         article_count=article_counts.get(c.id, 0),
         created_at=c.created_at
     ) for c in categories]
@@ -152,9 +158,21 @@ def delete_tag(
 
 
 @router.get("/tags", response_model=ResponseModel[List[TagResponse]])
-def get_tags(db: Session = Depends(get_db)):
+def get_tags(
+    categoryId: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
     """获取所有标签"""
-    tags = db.query(Tag).all()
+    query = db.query(Tag)
+    
+    if categoryId:
+        # 筛选该分类下有文章的标签
+        query = query.join(article_tags).join(Article).filter(
+            Article.category_id == categoryId,
+            Article.is_published == True
+        ).distinct()
+        
+    tags = query.all()
     data = [TagResponse(
         id=t.id,
         name=t.name,
