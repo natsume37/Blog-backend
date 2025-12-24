@@ -33,6 +33,7 @@ CREATE DATABASE blog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ### 4. Configure database
 
 The default configuration is:
+
 - Host: localhost
 - Port: 3306
 - User: root
@@ -70,6 +71,7 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 # Or if uv command has issues, use venv directly:
+
 ```bash
 .\.venv\Scripts\activate  # Windows
 source .venv/bin/activate # Linux/Mac
@@ -79,6 +81,7 @@ python -m uvicorn app.main:app --reload
 ## API Documentation
 
 Once the server is running, visit:
+
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
@@ -119,4 +122,38 @@ backend/
 │   └── create_admin.py      # Admin creation script
 ├── pyproject.toml           # Project dependencies
 └── README.md
+```
+
+## Database Migrations (Alembic)
+
+This project uses Alembic for database migrations.
+
+### Initialize (Already done)
+
+```bash
+uv run alembic init alembic
+```
+
+### Generate a new migration
+
+After modifying `app/models/*.py`:
+
+```bash
+uv run alembic revision --autogenerate -m "Description of changes"
+```
+
+### Apply migrations
+
+To upgrade the database to the latest version:
+
+```bash
+uv run alembic upgrade head
+```
+
+### Downgrade
+
+To undo the last migration:
+
+```bash
+uv run alembic downgrade -1
 ```

@@ -35,9 +35,13 @@ jobs:
             # 4. 同步依赖
             # uv sync 会自动读取 pyproject.toml，创建/更新 .venv
             echo "Syncing dependencies..."
-            uv sync
+            uv sync --frozen
 
-            # 5. 重启服务
+            # 5. 执行数据库迁移
+            echo "Running database migrations..."
+            uv run alembic upgrade head
+
+            # 6. 重启服务
             sudo systemctl restart fastapi-blog.service
 
             echo "Deployment successful!"
