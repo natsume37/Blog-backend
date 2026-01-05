@@ -31,6 +31,11 @@ class SiteConfig(BaseModel):
     # Message Board Banners (留言页面背景图列表)
     messageBoardBanners: List[str] = []
     
+    # Danmaku Settings
+    danmakuSpeed: int = 10  # 弹幕速度 (秒)
+    danmakuOpacity: float = 0.7  # 弹幕透明度
+    danmakuFontSize: int = 14  # 弹幕字体大小
+    
     class Config:
         from_attributes = True
 
