@@ -30,6 +30,7 @@ class SiteConfig(BaseModel):
     
     # Message Board Banners (留言页面背景图列表)
     messageBoardBanners: List[str] = []
+    messageBoardTitle: str = "弹幕"  # 留言板标题
     
     # Danmaku Settings
     danmakuSpeed: int = 10  # 弹幕速度 (秒)

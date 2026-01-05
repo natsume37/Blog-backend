@@ -83,6 +83,7 @@ def get_site_config(db: Session = Depends(get_db)):
         noticeText=get_val("notice_text", "欢迎访问我的个人博客！这里记录了我的学习笔记和生活感悟。本站持续更新中..."),
         aboutContent=get_val("about_content", "# 关于我\n\n这里是我的个人介绍..."),
         messageBoardBanners=json.loads(get_val("message_board_banners", default_banners)),
+        messageBoardTitle=get_val("message_board_title", "弹幕"),
         danmakuSpeed=int(get_val("danmaku_speed", "10")),
         danmakuOpacity=float(get_val("danmaku_opacity", "0.7")),
         danmakuFontSize=int(get_val("danmaku_font_size", "14")),
@@ -124,6 +125,7 @@ def update_site_config(
     set_val("notice_text", config.noticeText)
     set_val("about_content", config.aboutContent)
     set_val("message_board_banners", json.dumps(config.messageBoardBanners, ensure_ascii=False))
+    set_val("message_board_title", config.messageBoardTitle)
     set_val("danmaku_speed", str(config.danmakuSpeed))
     set_val("danmaku_opacity", str(config.danmakuOpacity))
     set_val("danmaku_font_size", str(config.danmakuFontSize))
