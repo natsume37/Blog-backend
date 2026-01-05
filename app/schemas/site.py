@@ -28,6 +28,9 @@ class SiteConfig(BaseModel):
     # About Me
     aboutContent: str = ""
     
+    # Message Board Banners (留言页面背景图列表)
+    messageBoardBanners: List[str] = []
+    
     class Config:
         from_attributes = True
 

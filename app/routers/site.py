@@ -64,6 +64,13 @@ def get_site_config(db: Session = Depends(get_db)):
     # Defaults
     default_sentences = json.dumps(["相信美好，遇见美好。", "生活明朗，万物可爱。", "保持热爱，奔赴山海。"], ensure_ascii=False)
     
+    # 默认留言板背景图
+    default_banners = json.dumps([
+        "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=2070&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=2070&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=2070&auto=format&fit=crop"
+    ], ensure_ascii=False)
+    
     config = SiteConfig(
         siteName=get_val("site_name", "Miyazaki Blog"),
         siteDescription=get_val("site_description", "相信美好，遇见美好。"),
@@ -74,7 +81,8 @@ def get_site_config(db: Session = Depends(get_db)):
         heroSentences=json.loads(get_val("hero_sentences", default_sentences)),
         showNotice=get_val("show_notice", "true") == "true",
         noticeText=get_val("notice_text", "欢迎访问我的个人博客！这里记录了我的学习笔记和生活感悟。本站持续更新中..."),
-        aboutContent=get_val("about_content", "# 关于我\n\n这里是我的个人介绍...")
+        aboutContent=get_val("about_content", "# 关于我\n\n这里是我的个人介绍..."),
+        messageBoardBanners=json.loads(get_val("message_board_banners", default_banners))
     )
     
     # Cache the result (1 hour)
@@ -111,6 +119,7 @@ def update_site_config(
     set_val("show_notice", "true" if config.showNotice else "false")
     set_val("notice_text", config.noticeText)
     set_val("about_content", config.aboutContent)
+    set_val("message_board_banners", json.dumps(config.messageBoardBanners, ensure_ascii=False))
     
     db.commit()
     
