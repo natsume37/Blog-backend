@@ -85,7 +85,8 @@ def get_site_config(db: Session = Depends(get_db)):
         messageBoardBanners=json.loads(get_val("message_board_banners", default_banners)),
         danmakuSpeed=int(get_val("danmaku_speed", "10")),
         danmakuOpacity=float(get_val("danmaku_opacity", "0.7")),
-        danmakuFontSize=int(get_val("danmaku_font_size", "14"))
+        danmakuFontSize=int(get_val("danmaku_font_size", "14")),
+        danmakuInterval=int(get_val("danmaku_interval", "1200"))
     )
     
     # Cache the result (1 hour)
@@ -126,6 +127,7 @@ def update_site_config(
     set_val("danmaku_speed", str(config.danmakuSpeed))
     set_val("danmaku_opacity", str(config.danmakuOpacity))
     set_val("danmaku_font_size", str(config.danmakuFontSize))
+    set_val("danmaku_interval", str(config.danmakuInterval))
     
     db.commit()
     

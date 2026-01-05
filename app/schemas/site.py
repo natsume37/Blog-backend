@@ -35,6 +35,7 @@ class SiteConfig(BaseModel):
     danmakuSpeed: int = 10  # 弹幕速度 (秒)
     danmakuOpacity: float = 0.7  # 弹幕透明度
     danmakuFontSize: int = 14  # 弹幕字体大小
+    danmakuInterval: int = 1200  # 弹幕生成间隔 (毫秒)
     
     class Config:
         from_attributes = True
