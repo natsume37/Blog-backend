@@ -12,11 +12,9 @@
 import sys
 import os
 import re
-
-
+from sqlalchemy import or_
 
 # 添加项目根目录到路径
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 尝试导入依赖项
@@ -30,33 +28,54 @@ except ImportError as e:
     sys.exit(1)
 
 
-# --- 核心创建逻辑（保持不变） ---
+# --- 核心逻辑 ---
 
-def create_user(
+def create_or_update_user(
         username: str,
         email: str,
         password: str,
         nickname: str = None,
         is_admin: bool = False
 ) -> bool:
-    """创建用户账号 (支持管理员/普通用户)"""
-    # ... (与之前版本保持一致)
+    """创建或更新用户账号"""
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
-        # 检查用户名是否存在
-        if db.query(User).filter(User.username == username).first():
-            print(f"❌ 错误: 用户名 '{username}' 已存在")
-            return False
+        # 检查用户是否存在 (用户名或邮箱)
+        user = db.query(User).filter(or_(User.username == username, User.email == email)).first()
 
-        # 检查邮箱是否存在
-        if db.query(User).filter(User.email == email).first():
-            print(f"❌ 错误: 邮箱 '{email}' 已被使用")
-            return False
+        if user:
+            print(f"\n⚠️  检测到已存在用户: {user.username} (邮箱: {user.email})")
+            print(f"    当前身份: {'管理员' if user.is_admin else '普通用户'}")
+            
+            # 如果是管理员脚本，通常有权限重置密码
+            confirm = get_validated_input(
+                "❓ 是否重置该用户的密码？(y/n)",
+                validate_yes_no,
+                allow_empty=False
+            ).lower()
 
-        # 创建用户
-        user = User(
+            if confirm == 'y':
+                user.hashed_password = get_password_hash(password)
+                # 如果提供了新昵称，则更新
+                if nickname:
+                    user.nickname = nickname
+                
+                # 如果要求是管理员，强制更新权限
+                if is_admin and not user.is_admin:
+                    user.is_admin = True
+                    print("    已升级为管理员权限")
+                
+                db.commit()
+                print(f"✅ 用户 {user.username} 密码已重置！")
+                return True
+            else:
+                print("🚫 操作已取消，未修改任何信息。")
+                return False
+
+        # 创建新用户
+        new_user = User(
             username=username,
             email=email,
             hashed_password=get_password_hash(password),
@@ -65,9 +84,9 @@ def create_user(
             is_admin=is_admin
         )
 
-        db.add(user)
+        db.add(new_user)
         db.commit()
-        db.refresh(user)
+        db.refresh(new_user)
 
         user_type = "管理员" if is_admin else "普通用户"
 
@@ -75,14 +94,14 @@ def create_user(
         print(f"✅ {user_type} 账号创建成功!")
         print(f"   用户名: {username}")
         print(f"   邮箱: {email}")
-        print(f"   昵称: {user.nickname}")
-        print(f"   ID: {user.id}")
+        print(f"   昵称: {new_user.nickname}")
+        print(f"   ID: {new_user.id}")
         print("=" * 50 + "\n")
         return True
 
     except Exception as e:
         db.rollback()
-        print(f"\n❌ 创建失败: {e}")
+        print(f"\n❌ 操作失败: {e}")
         return False
     finally:
         db.close()
@@ -205,10 +224,10 @@ def interactive_mode():
 
     # 4. 获取昵称（可选）
     nickname = get_validated_input(
-        f"4. 请输入昵称 (可选，回车使用用户名)",
+        f"4. 请输入昵称 (可选，回车默认为用户名/不修改原昵称)",
         lambda x: True,  # 对昵称的输入不进行格式校验，总是通过
         allow_empty=True,
-        optional_default=username
+        optional_default=None
     )
 
     # 5. 询问是否为管理员
@@ -238,9 +257,7 @@ def interactive_mode():
     ).lower()
 
     if confirm == 'y':
-        # 注意：这里的 nickname 如果是空字符串，要传入 None 或让 create_user 内部处理
-        final_nickname = nickname if nickname != username else None
-        create_user(username, email, password, nickname, is_admin)
+        create_or_update_user(username, email, password, nickname, is_admin)
     else:
         print("\n🚀 操作已取消。")
 
