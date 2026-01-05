@@ -1,7 +1,7 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.core.database import get_db
 from app.core.deps import get_current_admin, get_current_user_optional
@@ -189,7 +189,13 @@ def get_articles(
     
     # Search by keyword
     if keyword:
-        query = query.filter(Article.title.contains(keyword))
+        query = query.filter(
+            or_(
+                Article.title.contains(keyword),
+                Article.summary.contains(keyword),
+                Article.content.contains(keyword)
+            )
+        )
     
     # Sort
     if sort == "hot":
