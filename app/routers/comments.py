@@ -281,7 +281,9 @@ def delete_comment(
         return ResponseModel(code=403, msg="无权删除此评论")
     
     # 获取文章以更新评论数
-    article = db.query(Article).filter(Article.id == comment.article_id).first()
+    article = None
+    if comment.content_type == 'article':
+        article = db.query(Article).filter(Article.id == comment.content_id).first()
     
     # 计算要删除的评论数（包括子评论）
     child_count = db.query(Comment).filter(Comment.parent_id == comment_id).count()
@@ -376,7 +378,9 @@ def delete_comment_admin(
         return ResponseModel(code=404, msg="评论不存在")
     
     # 获取文章以更新评论数
-    article = db.query(Article).filter(Article.id == comment.article_id).first()
+    article = None
+    if comment.content_type == 'article':
+        article = db.query(Article).filter(Article.id == comment.content_id).first()
     
     # 计算要删除的评论数
     child_count = db.query(Comment).filter(Comment.parent_id == comment_id).count()
