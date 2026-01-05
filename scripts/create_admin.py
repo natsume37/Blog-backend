@@ -192,74 +192,80 @@ def get_validated_input(prompt: str, validator, allow_empty: bool = False, optio
 
 
 def interactive_mode():
-    """完全交互式创建用户，使用通用函数简化流程"""
     print("=" * 60)
-    print("          ✨ 博客用户账号创建向导 ✨")
-    print("      请根据提示，逐行输入账户信息 (输入 q 随时退出)")
+    print("          ✨ 用户账号管理 ✨")
     print("=" * 60)
-    print()
 
-    # 1. 获取用户名
-    # validator 必须接受一个参数 (输入值)
-    username = get_validated_input(
-        "1. 请输入用户名 (3-20个字符)",
-        validate_username,
-        allow_empty=False
-    )
-    if username is None: return  # 不会执行到这里，因为 get_validated_input 在退出时会 sys.exit(0)
+    # 1. 输入用户名
+    username = get_validated_input("请输入用户名", validate_username)
 
-    # 2. 获取邮箱
-    email = get_validated_input(
-        "2. 请输入邮箱 (例如: user@domain.com)",
-        validate_email,
-        allow_empty=False
-    )
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
 
-    # 3. 获取密码
-    password = get_validated_input(
-        "3. 请输入密码 (至少6位)",
-        validate_password,
-        allow_empty=False
-    )
+        if user:
+            print(f"\n✅ 用户已存在: {user.username} (ID: {user.id})")
+            print(f"   邮箱: {user.email}")
+            print(f"   权限: {'管理员' if user.is_admin else '普通用户'}")
+            
+            # 重置密码流程
+            reset = get_validated_input("❓ 是否重置密码? (y/n)", validate_yes_no).lower()
+            if reset == 'y':
+                pwd = get_validated_input("🔑 新密码", validate_password)
+                user.hashed_password = get_password_hash(pwd)
+                db.commit()
+                print("✅ 密码已更新。")
+            
+            # 升级管理员流程
+            if not user.is_admin:
+                upgrade = get_validated_input("❓ 是否升级为管理员? (y/n)", validate_yes_no).lower()
+                if upgrade == 'y':
+                    user.is_admin = True
+                    db.commit()
+                    print("✅ 已升级为管理员。")
+            
+            print("\n操作完成。")
+            return
 
-    # 4. 获取昵称（可选）
-    nickname = get_validated_input(
-        f"4. 请输入昵称 (可选，回车默认为用户名/不修改原昵称)",
-        lambda x: True,  # 对昵称的输入不进行格式校验，总是通过
-        allow_empty=True,
-        optional_default=None
-    )
+        # 创建新用户流程
+        print(f"\n用户 {username} 不存在，开始创建新用户...")
+        
+        email = get_validated_input("请输入邮箱", validate_email)
+        # 检查邮箱是否被占用
+        if db.query(User).filter(User.email == email).first():
+            print(f"❌ 邮箱 {email} 已被其他用户占用。")
+            return
 
-    # 5. 询问是否为管理员
-    is_admin_choice = get_validated_input(
-        "5. 是否将此用户设置为管理员? (y/n)",
-        validate_yes_no,
-        allow_empty=False
-    ).lower()
+        password = get_validated_input("请输入密码", validate_password)
+        
+        nickname = get_validated_input(
+            "请输入昵称 (可选)", 
+            lambda x: True, 
+            allow_empty=True, 
+            optional_default=username
+        )
+        
+        is_admin_str = get_validated_input("是否为管理员? (y/n)", validate_yes_no).lower()
+        is_admin = (is_admin_str == 'y')
 
-    is_admin = (is_admin_choice == 'y')
+        new_user = User(
+            username=username,
+            email=email,
+            hashed_password=get_password_hash(password),
+            nickname=nickname,
+            is_active=True,
+            is_admin=is_admin
+        )
+        
+        db.add(new_user)
+        db.commit()
+        print(f"\n✅ 用户 {username} 创建成功！")
 
-    # --- 最终确认 ---
-    print("\n" + "-" * 30)
-    print("✅ 账号信息最终确认:")
-    print(f"  用户名: {username}")
-    print(f"  邮箱: {email}")
-    # 昵称可能为空，但 get_validated_input 已经处理了默认值
-    print(f"  昵称: {nickname if nickname else username}")
-    print(f"  身份: {'管理员' if is_admin else '普通用户'}")
-    print("-" * 30)
-
-    # 6. 最终创建
-    confirm = get_validated_input(
-        "确认创建此用户账号? (y/n)",
-        validate_yes_no,
-        allow_empty=False
-    ).lower()
-
-    if confirm == 'y':
-        create_or_update_user(username, email, password, nickname, is_admin)
-    else:
-        print("\n🚀 操作已取消。")
+    except Exception as e:
+        print(f"❌ 错误: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def main():
