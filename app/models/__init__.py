@@ -5,6 +5,7 @@ from app.models.message import Message
 from app.models.site import SiteInfo
 from app.models.comment import Comment
 from app.models.monitor import VisitLog
+from app.models.changelog import Changelog
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog"]
+__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog"]
 
