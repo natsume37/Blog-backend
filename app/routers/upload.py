@@ -7,26 +7,6 @@ from app.utils.qiniu import generate_signed_key, verify_signed_key, generate_qin
 import time
 
 router = APIRouter(prefix="/upload", tags=["上传"])
-    t = format(expire_time, 'x')  # 转为16进制小写
-    
-    # 构建路径部分（需要确保以 / 开头）
-    path = f"/{key}" if not key.startswith('/') else key
-    
-    # URL编码路径（斜线不参与编码）
-    # 对路径的每个部分分别编码，然后用 / 连接
-    path_parts = path.split('/')
-    encoded_parts = [urllib.parse.quote(part, safe='') for part in path_parts]
-    encoded_path = '/'.join(encoded_parts)
-    
-    # 生成签名: md5(key + url_encode(path) + T).to_lower()
-    sign_str = f"{timestamp_key}{encoded_path}{t}"
-    sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest().lower()
-    
-    # 组装最终URL
-    if '?' in base_url:
-        return f"{base_url}&sign={sign}&t={t}"
-    else:
-        return f"{base_url}?sign={sign}&t={t}"
 
 
 @router.get("/token", response_model=ResponseModel)
