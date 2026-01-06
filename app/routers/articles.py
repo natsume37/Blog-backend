@@ -14,10 +14,9 @@ from app.schemas.article import (
     ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles
 )
 from app.schemas.common import ResponseModel, PagedData
-
-
-from app.core.config import get_settings, Settings
 from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
+from app.core.config import get_settings, Settings
+
 
 router = APIRouter(prefix="/articles", tags=["文章"])
 logger = logging.getLogger(__name__)
@@ -69,7 +68,8 @@ def get_admin_articles(
             likeCount=article.like_count,
             is_published=article.is_published,
             is_top=article.is_top,
-            is_recommend=article.is_recommend
+            is_recommend=article.is_recommend,
+            is_protected=article.is_protected
         ))
         
     return ResponseModel(
@@ -102,7 +102,8 @@ def create_article(
     cover = article_in.cover
     if settings.is_qiniu_timestamp_enabled:
         content = strip_qiniu_params(content, settings.QINIU_DOMAIN)
-        cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
+        if cover:
+            cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
             
     article = Article(
         title=article_in.title,
@@ -157,7 +158,7 @@ def update_article(
     if article_in.cover is not None:
         # 剥离签名
         cover = article_in.cover
-        if settings.is_qiniu_timestamp_enabled:
+        if settings.is_qiniu_timestamp_enabled and cover:
             cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
         article.cover = cover
     if article_in.category_id is not None:
