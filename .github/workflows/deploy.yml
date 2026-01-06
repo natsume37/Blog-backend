@@ -26,8 +26,8 @@ jobs:
             git pull origin main
 
             # 2.1 注入环境变量 (从 GitHub Secrets)
-            echo "Generating .env file..."
-            cat <<EOF > .env
+            echo "Generating .env.prod file..."
+            cat <<EOF > .env.prod
             # --- 基础配置 ---
             APP_NAME=Blog-Backend
             APP_VERSION=1.0.0
@@ -79,9 +79,9 @@ jobs:
             echo "Syncing dependencies..."
             uv sync --frozen
 
-            # 5. 执行数据库迁移
+            # 5. 执行数据库迁移 (设置 ENVIRONMENT 确保使用生产配置)
             echo "Running database migrations..."
-            uv run alembic upgrade head
+            ENVIRONMENT=production uv run alembic upgrade head
 
             # 6. 重启服务
             sudo systemctl restart fastapi-blog.service
