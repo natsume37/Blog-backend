@@ -77,6 +77,11 @@ class ArticleUpdate(BaseModel):
     is_published: Optional[bool] = None
     is_top: Optional[bool] = None
     is_recommend: Optional[bool] = None
+    
+    # 权限控制
+    is_protected: Optional[bool] = None
+    protection_question: Optional[str] = None
+    protection_answer: Optional[str] = None
 
 
 class ArticleListItem(BaseModel):
