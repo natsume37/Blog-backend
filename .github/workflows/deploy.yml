@@ -60,11 +60,16 @@ jobs:
             EMAILS_FROM_EMAIL=${{ secrets.EMAILS_FROM_EMAIL }}
             EMAILS_FROM_NAME=${{ secrets.EMAILS_FROM_NAME }}
 
-            # --- 七牛云 (可选) ---
+            # --- 七牛云 ---
             QINIU_ACCESS_KEY=${{ secrets.QINIU_ACCESS_KEY }}
             QINIU_SECRET_KEY=${{ secrets.QINIU_SECRET_KEY }}
             QINIU_BUCKET=${{ secrets.QINIU_BUCKET }}
             QINIU_DOMAIN=${{ secrets.QINIU_DOMAIN }}
+            
+            # --- 七牛云时间戳防盗链 ---
+            QINIU_TIMESTAMP_ENABLED=${{ secrets.QINIU_TIMESTAMP_ENABLED }}
+            QINIU_TIMESTAMP_KEY=${{ secrets.QINIU_TIMESTAMP_KEY }}
+            QINIU_TIMESTAMP_EXPIRE=${{ secrets.QINIU_TIMESTAMP_EXPIRE }}
             EOF
 
             # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)

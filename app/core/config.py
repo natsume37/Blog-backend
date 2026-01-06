@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     QINIU_SECRET_KEY: str | None = Field(default=None, description="七牛云Secret Key")
     QINIU_BUCKET: str | None = Field(default=None, description="七牛云存储桶名称")
     QINIU_DOMAIN: str | None = Field(default=None, description="七牛云存储桶域名")
+    
+    # 七牛云时间戳防盗链配置
+    QINIU_TIMESTAMP_ENABLED: bool = Field(default=False, description="是否启用七牛云时间戳防盗链")
+    QINIU_TIMESTAMP_KEY: str | None = Field(default=None, description="七牛云时间戳防盗链密钥")
+    QINIU_TIMESTAMP_EXPIRE: int = Field(default=3600, description="时间戳防盗链有效期(秒)")
 
     # ===========================
     # Pydantic 配置
@@ -113,6 +118,11 @@ class Settings(BaseSettings):
             self.QINIU_BUCKET,
             self.QINIU_DOMAIN
         ])
+    
+    @property
+    def is_qiniu_timestamp_enabled(self) -> bool:
+        """检查七牛云时间戳防盗链是否启用且已配置"""
+        return self.QINIU_TIMESTAMP_ENABLED and bool(self.QINIU_TIMESTAMP_KEY)
 
 
 
