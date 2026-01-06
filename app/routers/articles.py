@@ -69,7 +69,7 @@ def get_admin_articles(
             is_published=article.is_published,
             is_top=article.is_top,
             is_recommend=article.is_recommend,
-            is_protected=article.is_protected
+            is_protected=bool(article.is_protected or False)
         ))
         
     return ResponseModel(
