@@ -16,6 +16,9 @@ from app.schemas.article import (
 from app.schemas.common import ResponseModel, PagedData
 
 
+from app.core.config import get_settings, Settings
+from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
+
 router = APIRouter(prefix="/articles", tags=["文章"])
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,8 @@ def get_admin_articles(
     size: int = Query(10, ge=1, le=100),
     keyword: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings)
 ):
     """获取文章列表 (管理员 - 包含草稿)"""
     query = db.query(Article)
@@ -39,14 +43,25 @@ def get_admin_articles(
     total = query.count()
     articles = query.offset((current - 1) * size).limit(size).all()
     
+    # 获取七牛配置
+    qiniu_domain = settings.QINIU_DOMAIN
+    timestamp_key = settings.QINIU_TIMESTAMP_KEY
+    expire = settings.QINIU_TIMESTAMP_EXPIRE
+    
     records = []
     for article in articles:
         category_name = article.category.name if article.category else ""
+        
+        # 刷新 cover 中的签名链接
+        cover = article.cover
+        if settings.is_qiniu_timestamp_enabled and cover:
+            cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+            
         records.append(ArticleAdminListItem(
             id=article.id,
             title=article.title,
             summary=article.summary or "",
-            cover=article.cover or "",
+            cover=cover or "",
             createTime=article.created_at.strftime("%Y-%m-%d %H:%M:%S") if article.created_at else "",
             categoryName=category_name,
             viewCount=article.view_count,
@@ -72,7 +87,8 @@ def get_admin_articles(
 def create_article(
     article_in: ArticleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings)
 ):
     """创建文章 (管理员)"""
     # Check category
@@ -80,12 +96,19 @@ def create_article(
         category = db.query(Category).filter(Category.id == article_in.category_id).first()
         if not category:
             return ResponseModel(code=404, msg="分类不存在")
+    
+    # 剥离七牛云签名的逻辑
+    content = article_in.content
+    cover = article_in.cover
+    if settings.is_qiniu_timestamp_enabled:
+        content = strip_qiniu_params(content, settings.QINIU_DOMAIN)
+        cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
             
     article = Article(
         title=article_in.title,
         summary=article_in.summary,
-        content=article_in.content,
-        cover=article_in.cover,
+        content=content,
+        cover=cover,
         category_id=article_in.category_id,
         author_id=current_user.id,
         is_published=article_in.is_published,
@@ -113,7 +136,8 @@ def update_article(
     article_id: int,
     article_in: ArticleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings)
 ):
     """更新文章 (管理员)"""
     article = db.query(Article).filter(Article.id == article_id).first()
@@ -125,9 +149,17 @@ def update_article(
     if article_in.summary is not None:
         article.summary = article_in.summary
     if article_in.content is not None:
-        article.content = article_in.content
+        # 剥离签名
+        content = article_in.content
+        if settings.is_qiniu_timestamp_enabled:
+            content = strip_qiniu_params(content, settings.QINIU_DOMAIN)
+        article.content = content
     if article_in.cover is not None:
-        article.cover = article_in.cover
+        # 剥离签名
+        cover = article_in.cover
+        if settings.is_qiniu_timestamp_enabled:
+            cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
+        article.cover = cover
     if article_in.category_id is not None:
         article.category_id = article_in.category_id
     if article_in.is_published is not None:
@@ -186,7 +218,8 @@ def get_articles(
     tagId: Optional[int] = None,
     keyword: Optional[str] = None,
     sort: Optional[str] = "new",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ):
     """获取文章列表"""
     query = db.query(Article).filter(Article.is_published == True)
@@ -225,13 +258,25 @@ def get_articles(
     
     # Format response
     records = []
+    
+    # 获取七牛配置
+    qiniu_domain = settings.QINIU_DOMAIN
+    timestamp_key = settings.QINIU_TIMESTAMP_KEY
+    expire = settings.QINIU_TIMESTAMP_EXPIRE
+    
     for article in articles:
         category_name = article.category.name if article.category else ""
+        
+        # 刷新 cover 中的签名链接
+        cover = article.cover
+        if settings.is_qiniu_timestamp_enabled and cover:
+            cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+            
         records.append(ArticleListItem(
             id=article.id,
             title=article.title,
             summary=article.summary,
-            cover=article.cover,
+            cover=cover,
             createTime=article.created_at.strftime("%Y-%m-%d %H:%M:%S") if article.created_at else "",
             categoryName=category_name,
             viewCount=article.view_count,
@@ -255,7 +300,8 @@ def get_article(
     article_id: int, 
     answer: Optional[str] = Query(None, description="验证答案"),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    settings: Settings = Depends(get_settings)
 ):
     """获取文章详情"""
     # 绕过缓存直接查数据库以处理权限逻辑
@@ -296,6 +342,21 @@ def get_article(
         # 构建返回
         content = article.content if show_content else "文章受保护，请输入验证答案后查看。"
         
+        # 刷新内容和封面中的签名链接
+        cover = article.cover
+        if settings.is_qiniu_timestamp_enabled:
+            qiniu_domain = settings.QINIU_DOMAIN
+            timestamp_key = settings.QINIU_TIMESTAMP_KEY
+            expire = settings.QINIU_TIMESTAMP_EXPIRE
+            
+            # 仅在有权查看内容时刷新内容中的链接
+            if show_content:
+                content = refresh_qiniu_params_in_content(content, qiniu_domain, timestamp_key, expire)
+            
+            # 刷新封面链接
+            if cover:
+                cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+        
         # 格式化
         category = None
         if article.category:
@@ -320,7 +381,7 @@ def get_article(
                 id=article.id,
                 title=article.title,
                 summary=article.summary or "",
-                cover=article.cover,
+                cover=cover,
                 content=content,
                 createTime=article.created_at.strftime("%Y-%m-%d"),
                 createdAt=article.created_at,

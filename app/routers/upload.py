@@ -3,71 +3,10 @@ from qiniu import Auth
 from app.core.config import get_settings, Settings
 from app.core.deps import get_current_admin, get_current_user, get_current_user_optional
 from app.schemas.common import ResponseModel
-import hashlib
+from app.utils.qiniu import generate_signed_key, verify_signed_key, generate_qiniu_timestamp_url
 import time
-import urllib.parse
 
 router = APIRouter(prefix="/upload", tags=["上传"])
-
-# URL签名密钥（用于前后端加密验证）
-URL_SIGN_SECRET = "martin_blog_2024_secret_key"
-
-
-def generate_signed_key(key: str, timestamp: int) -> str:
-    """生成资源key的签名"""
-    raw_str = f"{key}-{timestamp}-{URL_SIGN_SECRET}"
-    return hashlib.md5(raw_str.encode("utf-8")).hexdigest()
-
-
-def verify_signed_key(key: str, timestamp: int, sign: str) -> bool:
-    """验证签名"""
-    expected = generate_signed_key(key, timestamp)
-    return sign == expected
-
-
-def generate_qiniu_timestamp_url(base_url: str, key: str, timestamp_key: str, expire_seconds: int = 3600) -> str:
-    """
-    生成七牛云时间戳防盗链URL
-    
-    算法说明:
-    - key: 七牛云控制台配置的时间戳防盗链密钥
-    - path: URL中的路径部分（不含querystring）
-    - T: 过期时间的16进制小写形式
-    - 签名原始字符串 S = key + url_encode(path) + T
-    - 签名 SIGN = md5(S).to_lower()
-    - 最终URL: 原始URL + &sign=<SIGN>&t=<T> (如果有querystring) 或 ?sign=<SIGN>&t=<T>
-    
-    Args:
-        base_url: 原始URL (如 http://xxx.com/path/file.mp4 或 http://xxx.com/path/file.mp4?v=1)
-        key: 资源key (路径部分，如 /path/file.mp4)
-        timestamp_key: 七牛云时间戳防盗链密钥
-        expire_seconds: 过期时间（秒），默认3600秒
-    
-    Returns:
-        带签名的URL
-    """
-    # 计算过期时间戳并转为16进制小写
-    expire_time = int(time.time()) + expire_seconds
-    t = format(expire_time, 'x')  # 转为16进制小写
-    
-    # 构建路径部分（需要确保以 / 开头）
-    path = f"/{key}" if not key.startswith('/') else key
-    
-    # URL编码路径（斜线不参与编码）
-    # 对路径的每个部分分别编码，然后用 / 连接
-    path_parts = path.split('/')
-    encoded_parts = [urllib.parse.quote(part, safe='') for part in path_parts]
-    encoded_path = '/'.join(encoded_parts)
-    
-    # 生成签名: md5(key + url_encode(path) + T).to_lower()
-    sign_str = f"{timestamp_key}{encoded_path}{t}"
-    sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest().lower()
-    
-    # 组装最终URL
-    if '?' in base_url:
-        return f"{base_url}&sign={sign}&t={t}"
-    else:
-        return f"{base_url}?sign={sign}&t={t}"
 
 
 @router.get("/token", response_model=ResponseModel)
