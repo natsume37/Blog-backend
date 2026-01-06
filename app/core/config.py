@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from app.main import logger
 
 class Settings(BaseSettings):
     # ===========================
@@ -141,7 +140,7 @@ def get_settings() -> Settings:
     # 4. 确定目标文件路径
     target_env_file = base_dir / env_files.get(env_mode, '.env')
 
-    logger.info(f"Loading config from: {target_env_file} (Exists: {target_env_file.exists()})")
+    print(f"Loading config from: {target_env_file} (Exists: {target_env_file.exists()})")
 
     # 5. 实例化 Settings，传入 _env_file 参数
     # 注意：如果文件不存在，Pydantic 会默认忽略或仅使用系统环境变量
