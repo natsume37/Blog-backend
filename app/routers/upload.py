@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from qiniu import Auth
-from app.core.config import Settings
+from app.core.config import get_settings, Settings
 from app.core.deps import get_current_admin, get_current_user, get_current_user_optional
 from app.schemas.common import ResponseModel
-from functools import lru_cache
 import hashlib
 import time
 import urllib.parse
@@ -12,10 +11,6 @@ router = APIRouter(prefix="/upload", tags=["上传"])
 
 # URL签名密钥（用于前后端加密验证）
 URL_SIGN_SECRET = "martin_blog_2024_secret_key"
-
-@lru_cache()
-def get_settings():
-    return Settings()
 
 
 def generate_signed_key(key: str, timestamp: int) -> str:

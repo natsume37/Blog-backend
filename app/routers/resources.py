@@ -47,7 +47,7 @@ def get_resources(
     type: Optional[str] = Query(None, description="media_type prefix, e.g. image, video"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
-    settings: Settings = Depends(lambda: Settings())
+    settings: Settings = Depends(get_settings)
 ):
     """获取资源列表 (仅管理员)"""
     # 获取当前列表缓存版本号
