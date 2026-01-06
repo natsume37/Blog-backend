@@ -10,7 +10,7 @@ from app.models.monitor import VisitLog
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.logger import setup_logging
-from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog
+from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources
 from app.tasks import start_scheduler, stop_scheduler
 
 # Create database tables
@@ -118,6 +118,8 @@ app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitor.router, prefix=settings.API_V1_PREFIX)
 app.include_router(comments.router, prefix=settings.API_V1_PREFIX)
 app.include_router(changelog.router, prefix=settings.API_V1_PREFIX)
+app.include_router(upload.router, prefix="/api/v1")
+app.include_router(resources.router, prefix="/api/v1")
 
 
 @app.get("/")

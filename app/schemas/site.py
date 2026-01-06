@@ -28,6 +28,7 @@ class SiteConfig(BaseModel):
     # About Me
     aboutContent: str = ""
     
+    
     # Message Board Banners (留言页面背景图列表)
     messageBoardBanners: List[str] = []
     messageBoardTitle: str = "弹幕"  # 留言板标题

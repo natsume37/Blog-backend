@@ -89,6 +89,11 @@ class Article(Base):
     is_top = Column(Boolean, default=False)
     is_recommend = Column(Boolean, default=False)
     
+    # 权限控制
+    is_protected = Column(Boolean, default=False, comment="是否受保护")
+    protection_question = Column(String(255), nullable=True, comment="验证问题")
+    protection_answer = Column(String(255), nullable=True, comment="验证答案")
+    
     # Timestamps
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

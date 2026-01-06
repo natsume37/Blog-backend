@@ -1,4 +1,5 @@
 from typing import Optional, List
+import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -16,6 +17,7 @@ from app.schemas.common import ResponseModel, PagedData
 
 
 router = APIRouter(prefix="/articles", tags=["文章"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/admin/list", response_model=ResponseModel[PagedData[ArticleAdminListItem]])
@@ -88,7 +90,10 @@ def create_article(
         author_id=current_user.id,
         is_published=article_in.is_published,
         is_top=article_in.is_top,
-        is_recommend=article_in.is_recommend
+        is_recommend=article_in.is_recommend,
+        is_protected=article_in.is_protected,
+        protection_question=article_in.protection_question,
+        protection_answer=article_in.protection_answer
     )
     
     # Add tags
@@ -131,6 +136,13 @@ def update_article(
         article.is_top = article_in.is_top
     if article_in.is_recommend is not None:
         article.is_recommend = article_in.is_recommend
+        
+    if article_in.is_protected is not None:
+        article.is_protected = article_in.is_protected
+    if article_in.protection_question is not None:
+        article.protection_question = article_in.protection_question
+    if article_in.protection_answer is not None:
+        article.protection_answer = article_in.protection_answer
         
     # Update tags
     if article_in.tag_ids is not None:
@@ -239,72 +251,94 @@ def get_articles(
 
 
 @router.get("/{article_id}", response_model=ResponseModel[ArticleDetail])
-def get_article(article_id: int, db: Session = Depends(get_db)):
+def get_article(
+    article_id: int, 
+    answer: Optional[str] = Query(None, description="验证答案"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """获取文章详情"""
-    # Try cache first
-    cache_key = f"article:{article_id}"
-    cached_data = redis_client.get(cache_key)
+    # 绕过缓存直接查数据库以处理权限逻辑
+    # 实际生产中可以优化为：先查缓存获取文章基础信息和保护状态，再进行判断
+    logger.info(f"Start fetching article_id: {article_id}")
     
-    if cached_data:
-        # Increment view count in Redis
-        view_count_key = f"article:{article_id}:views"
-        new_views = redis_client.incr(view_count_key)
+    try:
+        article = db.query(Article).filter(Article.id == article_id).first()
+        if not article:
+            logger.warning(f"Article {article_id} not found")
+            return ResponseModel(code=404, msg="文章不存在")
+            
+        if not article.is_published:
+            # 只有管理员能看未发布的文章
+            if not (current_user and current_user.is_admin):
+                logger.warning(f"Article {article_id} not published and user is not admin")
+                return ResponseModel(code=404, msg="文章不存在")
+            
+        # 增加阅读数 (简单实现，直接写库或 Redis)
+        # 这里为了简便，沿用之前的 Redis 逻辑或直接 +1
+        article.view_count += 1
+        db.commit()
+                
+        # 权限检查
+        show_content = True
+        logger.info(f"Checking permission for article {article_id}. is_protected: {article.is_protected}")
+        if article.is_protected:
+            show_content = False
+            # 管理员直接看
+            if current_user and current_user.is_admin:
+                show_content = True
+            # 验证答案
+            elif answer and answer == article.protection_answer:
+                show_content = True
         
-        # Update the cached data's view count
-        cached_data['viewCount'] = new_views
+        logger.info(f"Show content for article {article_id}: {show_content}")
+                
+        # 构建返回
+        content = article.content if show_content else "文章受保护，请输入验证答案后查看。"
+        
+        # 格式化
+        category = None
+        if article.category:
+            category = CategoryResponse(
+                id=article.category.id,
+                name=article.category.name,
+                description=article.category.description,
+                sort_order=article.category.sort_order,
+                banner_url=article.category.banner_url,
+                quote=article.category.quote,
+                quote_author=article.category.quote_author
+            )
+            
+        tags = [TagResponse(id=t.id, name=t.name, color=t.color) for t in article.tags]
+        
+        logger.info(f"Building response for article {article_id}")
         
         return ResponseModel(
-            code=200,
-            data=ArticleDetail(**cached_data)
+            code=200 if show_content else 403, # 403 表示需要验证，前端据此显示输入框
+            msg="success" if show_content else "protected",
+            data=ArticleDetail(
+                id=article.id,
+                title=article.title,
+                summary=article.summary or "",
+                cover=article.cover,
+                content=content,
+                createTime=article.created_at.strftime("%Y-%m-%d"),
+                createdAt=article.created_at,
+                categoryName=article.category.name if article.category else "",
+                category=category,
+                tags=tags,
+                viewCount=article.view_count,
+                commentCount=article.comment_count,
+                likeCount=article.like_count,
+                is_top=article.is_top,
+                is_recommend=article.is_recommend,
+                is_protected=bool(article.is_protected or False),
+                protection_question=article.protection_question if article.is_protected else None
+            )
         )
-    
-    # If not in cache, query DB
-    article = db.query(Article).filter(Article.id == article_id).first()
-    
-    if not article:
-        return ResponseModel(code=404, msg="文章不存在")
-    
-    # Handle view count
-    # We use Redis to track real-time views
-    view_count_key = f"article:{article_id}:views"
-    
-    # If key doesn't exist, initialize from DB
-    if not redis_client.get_client().exists(view_count_key):
-        redis_client.get_client().set(view_count_key, article.view_count)
-    
-    # Increment in Redis
-    new_views = redis_client.incr(view_count_key)
-    
-    category_name = article.category.name if article.category else ""
-    tags = [TagResponse(id=tag.id, name=tag.name, color=tag.color, created_at=tag.created_at) for tag in article.tags]
-    
-    detail_data = ArticleDetail(
-        id=article.id,
-        title=article.title,
-        summary=article.summary or "",
-        content=article.content,
-        cover=article.cover or "",
-        category_id=article.category_id,
-        categoryName=category_name,
-        tags=tags,
-        viewCount=new_views,
-        commentCount=article.comment_count,
-        likeCount=article.like_count,
-        is_published=article.is_published,
-        is_top=article.is_top,
-        is_recommend=article.is_recommend,
-        createdAt=article.created_at,
-        updatedAt=article.updated_at
-    )
-    
-    # Cache the detail data (excluding view count which changes often, or include it and update it)
-    # We cache the structure. When reading, we overlay the dynamic view count.
-    redis_client.set(cache_key, detail_data.model_dump(), expire=300) # Cache for 5 mins
-    
-    return ResponseModel(
-        code=200,
-        data=detail_data
-    )
+    except Exception as e:
+        logger.error(f"Error fetching article {article_id}: {str(e)}", exc_info=True)
+        raise e
 
 
 @router.post("/{article_id}/like", response_model=ResponseModel)

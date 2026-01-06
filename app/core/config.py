@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = Field(default=6379, description='Redis端口')
     REDIS_DB: int = Field(default=0, description='Redis数据库索引')
     REDIS_PASSWORD: str | None = Field(default=None, description='Redis密码')
+    REDIS_CACHE_TTL: int = Field(default=180, description='Redis缓存过期时间(秒)')
 
     # ===========================
     # 定时任务配置 (Scheduler)
@@ -72,6 +73,14 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = Field(default='Blog Admin', description='发件人名称')
 
     # ===========================
+    # 七牛云文章配置 (Qiniu)
+    # ===========================
+    QINIU_ACCESS_KEY: str | None = Field(default=None, description="七牛云Access Key")
+    QINIU_SECRET_KEY: str | None = Field(default=None, description="七牛云Secret Key")
+    QINIU_BUCKET: str | None = Field(default=None, description="七牛云存储桶名称")
+    QINIU_DOMAIN: str | None = Field(default=None, description="七牛云存储桶域名")
+
+    # ===========================
     # Pydantic 配置
     # ===========================
     # 允许从 .env 文件读取，同时忽略多余字段
@@ -94,6 +103,18 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """同步数据库URL (用于Alembic)"""
         return str(self.DATABASE_URL).replace('+asyncpg', '')
+    
+    @property
+    def is_qiniu_enabled(self) -> bool:
+        """检查七牛云是否已配置且可用"""
+        # Pydantic 会自动处理环境变量优先级: 系统环境变量 > .env文件
+        return all([
+            self.QINIU_ACCESS_KEY,
+            self.QINIU_SECRET_KEY,
+            self.QINIU_BUCKET,
+            self.QINIU_DOMAIN
+        ])
+
 
 
 # ===========================

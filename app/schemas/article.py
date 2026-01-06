@@ -56,6 +56,11 @@ class ArticleBase(BaseModel):
     is_published: Optional[bool] = True
     is_top: Optional[bool] = False
     is_recommend: Optional[bool] = False
+    
+    # 权限控制
+    is_protected: bool = False
+    protection_question: Optional[str] = None
+    protection_answer: Optional[str] = None
 
 
 class ArticleCreate(ArticleBase):
@@ -89,29 +94,43 @@ class ArticleListItem(BaseModel):
         from_attributes = True
 
 
-class ArticleAdminListItem(ArticleListItem):
-    is_published: bool
-    is_top: bool
-    is_recommend: bool
-
-
-class ArticleDetail(BaseModel):
+class ArticleAdminListItem(BaseModel):
     id: int
     title: str
     summary: str
-    content: str
     cover: str
-    category_id: Optional[int] = None
-    categoryName: Optional[str] = ""
-    tags: List[TagResponse] = []
+    createTime: str
+    categoryName: str
     viewCount: int
     commentCount: int
     likeCount: int
     is_published: bool
     is_top: bool
     is_recommend: bool
+    is_protected: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class ArticleDetail(BaseModel):
+    id: int
+    title: str
+    summary: Optional[str] = ""
+    content: str
+    cover: Optional[str] = ""
+    createTime: str
     createdAt: Optional[datetime] = None
-    updatedAt: Optional[datetime] = None
+    categoryName: Optional[str] = ""
+    category: Optional[CategoryResponse] = None
+    tags: List[TagResponse] = []
+    viewCount: int
+    commentCount: int
+    likeCount: int
+    is_top: bool = False
+    is_recommend: bool = False
+    is_protected: Optional[bool] = False
+    protection_question: Optional[str] = None
 
     class Config:
         from_attributes = True
