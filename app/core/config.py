@@ -1,3 +1,7 @@
+"""
+应用配置模块 (Application Configuration Module)
+包含基础配置、数据库配置、缓存配置、日志配置等。
+"""
 import os
 from pathlib import Path
 from typing import Literal
@@ -78,7 +82,7 @@ class Settings(BaseSettings):
     QINIU_SECRET_KEY: str | None = Field(default=None, description="七牛云Secret Key")
     QINIU_BUCKET: str | None = Field(default=None, description="七牛云存储桶名称")
     QINIU_DOMAIN: str | None = Field(default=None, description="七牛云存储桶域名")
-    
+
     # 七牛云时间戳防盗链配置
     QINIU_TIMESTAMP_ENABLED: bool = Field(default=False, description="是否启用七牛云时间戳防盗链")
     QINIU_TIMESTAMP_KEY: str | None = Field(default=None, description="七牛云时间戳防盗链密钥")
@@ -107,7 +111,7 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """同步数据库URL (用于Alembic)"""
         return str(self.DATABASE_URL).replace('+asyncpg', '')
-    
+
     @property
     def is_qiniu_enabled(self) -> bool:
         """检查七牛云是否已配置且可用"""
@@ -118,12 +122,11 @@ class Settings(BaseSettings):
             self.QINIU_BUCKET,
             self.QINIU_DOMAIN
         ])
-    
+
     @property
     def is_qiniu_timestamp_enabled(self) -> bool:
         """检查七牛云时间戳防盗链是否启用且已配置"""
         return self.QINIU_TIMESTAMP_ENABLED and bool(self.QINIU_TIMESTAMP_KEY)
-
 
 
 # ===========================
@@ -149,8 +152,6 @@ def get_settings() -> Settings:
 
     # 4. 确定目标文件路径
     target_env_file = base_dir / env_files.get(env_mode, '.env')
-
-    print(f"Loading config from: {target_env_file} (Exists: {target_env_file.exists()})")
 
     # 5. 实例化 Settings，传入 _env_file 参数
     # 注意：如果文件不存在，Pydantic 会默认忽略或仅使用系统环境变量
