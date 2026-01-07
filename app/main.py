@@ -53,11 +53,35 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=settings.CORS_ORIGINS, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Referer Guard Middleware (Anti-leeching for API)
+@app.middleware("http")
+async def referer_guard(request: Request, call_next):
+    # Skip if disabled or allowed all
+    if not settings.ENABLE_REFERER_CHECK or "*" in settings.CORS_ORIGINS:
+        return await call_next(request)
+        
+    # Check only API v1 requests
+    if request.url.path.startswith(settings.API_V1_PREFIX):
+        referer = request.headers.get("referer")
+        if referer:
+            # Check if referer matches any allowed origin
+            allowed = False
+            for origin in settings.CORS_ORIGINS:
+                # Remove protocol for cleaner comparison if needed, or strict match
+                if referer.startswith(origin):
+                    allowed = True
+                    break
+            
+            if not allowed:
+                return JSONResponse(status_code=403, content={"code": 403, "msg": "Access denied (Invalid Referer)"})
+                
+    return await call_next(request)
 
 # Visit Logger Middleware
 @app.middleware("http")

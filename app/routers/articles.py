@@ -69,7 +69,8 @@ def get_admin_articles(
             is_published=article.is_published,
             is_top=article.is_top,
             is_recommend=article.is_recommend,
-            is_protected=bool(article.is_protected or False)
+            is_protected=bool(article.is_protected or False),
+            is_hidden=bool(article.is_hidden or False)
         ))
         
     return ResponseModel(
@@ -115,6 +116,7 @@ def create_article(
         is_published=article_in.is_published,
         is_top=article_in.is_top,
         is_recommend=article_in.is_recommend,
+        is_hidden=article_in.is_hidden,
         is_protected=article_in.is_protected,
         protection_question=article_in.protection_question,
         protection_answer=article_in.protection_answer
@@ -169,6 +171,9 @@ def update_article(
         article.is_top = article_in.is_top
     if article_in.is_recommend is not None:
         article.is_recommend = article_in.is_recommend
+    
+    if article_in.is_hidden is not None:
+        article.is_hidden = article_in.is_hidden
         
     if article_in.is_protected is not None:
         article.is_protected = article_in.is_protected
@@ -223,7 +228,10 @@ def get_articles(
     settings: Settings = Depends(get_settings)
 ):
     """获取文章列表"""
-    query = db.query(Article).filter(Article.is_published == True)
+    query = db.query(Article).filter(
+        Article.is_published == True,
+        or_(Article.is_hidden == False, Article.is_hidden == None)
+    )
     
     # Filter by category
     if categoryId:
@@ -394,6 +402,7 @@ def get_article(
                 likeCount=article.like_count,
                 is_top=article.is_top,
                 is_recommend=article.is_recommend,
+                is_hidden=bool(article.is_hidden or False),
                 is_protected=bool(article.is_protected or False),
                 protection_question=article.protection_question if article.is_protected else None
             )

@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default="insecure-key-change-me", description='JWT密钥')
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    
+    # CORS & Referer
+    CORS_ORIGINS: list[str] = Field(default=["*"], description="允许的跨域来源")
+    ENABLE_REFERER_CHECK: bool = Field(default=False, description="是否开启严格Referer检查(防盗链)")
 
     # ===========================
     # 邮件配置 (Email)
