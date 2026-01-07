@@ -70,6 +70,11 @@ jobs:
             QINIU_TIMESTAMP_ENABLED=${{ secrets.QINIU_TIMESTAMP_ENABLED }}
             QINIU_TIMESTAMP_KEY=${{ secrets.QINIU_TIMESTAMP_KEY }}
             QINIU_TIMESTAMP_EXPIRE=${{ secrets.QINIU_TIMESTAMP_EXPIRE }}
+            
+            # --- 安全加强 (防盗链) ---
+            # 请在 GitHub Secrets 中配置 CORS_ORIGINS 为 JSON 格式数组，例如: ["https://martin88.xyz", "https://www.martin88.xyz"]
+            CORS_ORIGINS='${{ secrets.CORS_ORIGINS }}'
+            ENABLE_REFERER_CHECK=${{ secrets.ENABLE_REFERER_CHECK }}
             EOF
 
             # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
