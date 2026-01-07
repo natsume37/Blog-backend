@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # ===========================
     # 基础配置 (Base)
     # ===========================
-    APP_NAME: str = Field(default='FastAPI AI Backend', description='应用名称')
+    APP_NAME: str = Field(default='FastAPI Blog Backend', description='应用名称')
     APP_VERSION: str = Field(default='1.0.0', description='应用版本')
     ENVIRONMENT: Literal['development', 'staging', 'production'] = Field(
         default='development', description='运行环境'
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = Field(default='user@example.com', description='SMTP用户名')
     SMTP_PASSWORD: str = Field(default='password', description='SMTP密码')
     EMAILS_FROM_EMAIL: str = Field(default='user@example.com', description='发件人邮箱')
-    EMAILS_FROM_NAME: str = Field(default='Blog Admin', description='发件人名称')
+    EMAILS_FROM_NAME: str = Field(default='Martin-BLog', description='发件人名称')
 
     # ===========================
     # 七牛云文章配置 (Qiniu)

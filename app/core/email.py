@@ -60,7 +60,7 @@ def send_reset_password_email(email_to: str, code: str):
     """
     发送重置密码验证码邮件
     """
-    subject = f"{settings.APP_NAME} - 重置密码验证码"
+    subject = f"{settings.EMAILS_FROM_NAME} - 重置密码验证码"
     html_content = f"""
     <html>
         <body>
