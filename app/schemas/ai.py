@@ -34,3 +34,12 @@ class AISummaryResponse(BaseModel):
     summary: str
     provider: str
     model: str
+
+
+class AIConfig(BaseModel):
+    ai_enabled: bool
+    ai_provider: str
+    ai_base_url: str
+    ai_api_key: str
+    ai_model: str
+    ai_timeout_seconds: int
