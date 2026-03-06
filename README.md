@@ -1,189 +1,117 @@
 # Blog Backend
 
-FastAPI backend for the Miyazaki Style Blog.
+[中文（默认）](./README.md) | [English](./README.en.md)
 
-## Tech Stack
+FastAPI 博客后端服务。
 
-- **Framework**: FastAPI
-- **Database**: MySQL
+## 技术栈
+
+- **框架**: FastAPI
+- **数据库**: MySQL
 - **ORM**: SQLAlchemy
-- **Package Manager**: uv
+- **包管理器**: uv
 
-## Setup
+## 快速开始
 
-### 1. Install uv (if not installed)
+### 1. 安装 uv（若未安装）
 
 ```bash
 pip install uv
 ```
 
-### 2. Create virtual environment and install dependencies
+### 2. 创建虚拟环境并安装依赖
 
 ```bash
-cd backend
 uv sync
 ```
 
-### 3. Create MySQL database
+### 3. 创建 MySQL 数据库
 
 ```sql
 CREATE DATABASE blog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 4. Configure environment (uv + env files)
+### 4. 配置环境变量
 
-This project reads config by `ENVIRONMENT`:
+项目根据 `ENVIRONMENT` 读取配置文件：
 
 - `development` -> `.env.dev`
 - `production` -> `.env.prod`
 - `staging` -> `.env.staging`
 
-Create your env files from templates:
+从模板复制：
 
 ```bash
 cp .env.dev.example .env.dev
 cp .env.prod.example .env.prod
 ```
 
-Important production fields:
+生产环境重点配置项：
 
 - `SECRET_KEY`
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
 
-### 5. Create Admin Account
+### 5. 创建管理员账号
 
 ```bash
-# Use default admin (admin / admin123)
+# 使用默认账号（admin / admin123）
 uv run python scripts/create_admin.py
 
-# Or use interactive mode
+# 交互模式
 uv run python scripts/create_admin.py -i
 
-# Or specify parameters
+# 指定参数
 uv run python scripts/create_admin.py -u myusername -e myemail@example.com -p mypassword -n "My Nickname"
 ```
 
-### 6. Run with uv
+### 6. 启动服务
 
-Use the helper script (recommended):
+推荐使用脚本：
 
 ```bash
-# development (reload on)
+# 开发环境（开启热重载）
 ./scripts/uv-run.sh dev
 
-# production (reload off)
+# 生产环境（关闭热重载）
 ./scripts/uv-run.sh prod
 ```
 
-Or run directly:
+或直接执行：
 
 ```bash
 ENVIRONMENT=development uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8090
 ENVIRONMENT=production uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
 
-### 7. systemd (production)
+## API 文档
 
-Use `EnvironmentFile` so backend env is managed in one place:
-
-```ini
-[Unit]
-Description=FastAPI Blog Backend
-After=network.target
-
-[Service]
-User=root
-Group=root
-WorkingDirectory=/root/work/blog/Blog-backend
-EnvironmentFile=/root/work/blog/Blog-backend/.env.prod
-Environment=ENVIRONMENT=production
-ExecStart=/usr/local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Tip: use `which uv` on server and replace `/usr/local/bin/uv` if your path differs.
-
-## API Documentation
-
-Once the server is running, visit:
+服务启动后可访问：
 
 - Swagger UI: http://localhost:8090/docs
 - ReDoc: http://localhost:8090/redoc
 
-## Project Structure
-
-```
-backend/
-├── app/
-│   ├── __init__.py
-│   ├── main.py              # Application entry point
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py        # Configuration settings
-│   │   ├── database.py      # Database connection
-│   │   ├── deps.py          # Dependency injection (auth)
-│   │   └── security.py      # JWT & password hashing
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── user.py          # User model
-│   │   ├── article.py       # Article, Category, Tag models
-│   │   ├── message.py       # Message, Comment models
-│   │   └── site.py          # Site info model
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── auth.py          # Authentication routes
-│   │   ├── articles.py      # Article routes
-│   │   ├── categories.py    # Category & Tag routes
-│   │   ├── messages.py      # Message routes
-│   │   └── site.py          # Site info routes
-│   └── schemas/
-│       ├── __init__.py
-│       ├── common.py        # Common response models
-│       ├── user.py          # User schemas
-│       ├── article.py       # Article schemas
-│       ├── message.py       # Message schemas
-│       └── site.py          # Site schemas
-├── scripts/
-│   └── create_admin.py      # Admin creation script
-├── pyproject.toml           # Project dependencies
-└── README.md
-```
-
-## Database Migrations (Alembic)
-
-This project uses Alembic for database migrations.
-
-### Initialize (Already done)
+## 数据库迁移（Alembic）
 
 ```bash
-uv run alembic init alembic
-```
-
-### Generate a new migration
-
-After modifying `app/models/*.py`:
-
-```bash
+# 生成迁移（模型变更后）
 uv run alembic revision --autogenerate -m "Description of changes"
-```
 
-### Apply migrations
-
-To upgrade the database to the latest version:
-
-```bash
+# 执行迁移
 uv run alembic upgrade head
+
+# 回滚最近一次迁移
+uv run alembic downgrade -1
 ```
 
-### Downgrade
+## 项目结构
 
-To undo the last migration:
-
-```bash
-uv run alembic downgrade -1
+```text
+Blog-backend/
+├── app/
+├── alembic/
+├── scripts/
+├── pyproject.toml
+└── README.md
 ```
