@@ -7,6 +7,7 @@ import ipaddress
 import json
 from functools import lru_cache
 from urllib.request import urlopen
+from urllib.request import Request as UrlRequest
 from urllib.error import URLError, HTTPError
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask, BackgroundTasks
@@ -39,9 +40,15 @@ def _resolve_public_ip_location(ip: str) -> tuple[str, str]:
 
     url = settings.GEOIP_PROVIDER_URL.replace("{ip}", ip)
     timeout = 1.5
-    req = urlopen(url, timeout=timeout)
-    with req:
-        payload = json.loads(req.read().decode("utf-8", errors="ignore"))
+    req = UrlRequest(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (BlogBackend/1.0; +https://martin88.xyz)",
+            "Accept": "application/json",
+        },
+    )
+    with urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
     # Support common response formats. Primary target: ip2location / ipwho.is
     if isinstance(payload, dict):

@@ -81,6 +81,10 @@ jobs:
             # 请在 GitHub Secrets 中配置 CORS_ORIGINS 为 JSON 格式数组，例如: ["https://martin88.xyz", "https://www.martin88.xyz"]
             CORS_ORIGINS='${{ secrets.CORS_ORIGINS }}'
             ENABLE_REFERER_CHECK=${{ secrets.ENABLE_REFERER_CHECK }}
+
+            # --- GeoIP ---
+            GEOIP_ENABLED=true
+            GEOIP_PROVIDER_URL=https://api.ip2location.io/?ip={ip}
             EOF
 
             # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
