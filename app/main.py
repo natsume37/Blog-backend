@@ -4,6 +4,10 @@ from fastapi.responses import JSONResponse
 import time
 import logging
 import ipaddress
+import json
+from functools import lru_cache
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask, BackgroundTasks
 from app.core.database import SessionLocal
@@ -18,6 +22,44 @@ from app.tasks import start_scheduler, stop_scheduler
 setup_logging()
 logger = logging.getLogger("app")
 
+
+def _is_private_or_loopback_ip(ip: str) -> bool:
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        return bool(ip_obj.is_private or ip_obj.is_loopback)
+    except ValueError:
+        return ip in ["127.0.0.1", "localhost", "::1"] or ip.startswith(("192.168.", "10."))
+
+
+@lru_cache(maxsize=4096)
+def _resolve_public_ip_location(ip: str) -> tuple[str, str]:
+    """Resolve public IP location via configurable GeoIP provider."""
+    if not settings.GEOIP_ENABLED:
+        return "", ""
+
+    url = settings.GEOIP_PROVIDER_URL.replace("{ip}", ip)
+    timeout = max(0.2, float(settings.GEOIP_TIMEOUT_SECONDS))
+    req = urlopen(url, timeout=timeout)
+    with req:
+        payload = json.loads(req.read().decode("utf-8", errors="ignore"))
+
+    # Support common response formats. Primary target: ipwho.is
+    if isinstance(payload, dict):
+        success = payload.get("success")
+        if success is False:
+            return "", ""
+
+        province = str(
+            payload.get("region")
+            or payload.get("province")
+            or payload.get("region_name")
+            or ""
+        ).strip()
+        city = str(payload.get("city") or "").strip()
+        return province, city
+
+    return "", ""
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup")
@@ -30,16 +72,21 @@ async def lifespan(app: FastAPI):
 
 def get_location_from_ip(ip: str):
     """
-    Simple IP to location resolver.
-    In production, use a library like ip2region or GeoLite2.
+    Resolve IP location.
+    - Private/loopback: 内网 局域网
+    - Public IP: configurable GeoIP provider (optional)
     """
+    if _is_private_or_loopback_ip(ip):
+        return "内网", "局域网"
+
     try:
-        ip_obj = ipaddress.ip_address(ip)
-        if ip_obj.is_private or ip_obj.is_loopback:
-            return "内网", "局域网"
-    except ValueError:
-        if ip in ["127.0.0.1", "localhost", "::1"] or ip.startswith("192.168.") or ip.startswith("10."):
-            return "内网", "局域网"
+        province, city = _resolve_public_ip_location(ip)
+        if province or city:
+            return province, city
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        logger.debug(f"GeoIP resolve failed for {ip}: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected GeoIP resolve error for {ip}: {e}")
 
     return "", ""
 
