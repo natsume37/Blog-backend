@@ -1,9 +1,7 @@
-from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
 from sqlalchemy.orm import Session
-from pydantic import ValidationError
 import logging
 
 from app.core.config import settings
@@ -21,7 +19,8 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX
 
 def get_current_user(
     db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    request: Request = None,
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -29,7 +28,11 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    payload = decode_access_token(token)
+    raw_token = token or (request.cookies.get("access_token") if request else None)
+    if not raw_token:
+        raise credentials_exception
+
+    payload = decode_access_token(raw_token)
     if payload is None:
         raise credentials_exception
         
@@ -37,7 +40,12 @@ def get_current_user(
     if user_id is None:
         raise credentials_exception
         
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        raise credentials_exception
+
+    user = db.query(User).filter(User.id == user_id_int).first()
     if user is None:
         raise credentials_exception
         
@@ -46,13 +54,15 @@ def get_current_user(
 
 def get_optional_current_user(
     db: Session = Depends(get_db),
+    request: Request = None,
     token: Optional[str] = Depends(oauth2_scheme_optional)
 ) -> Optional[User]:
     """获取当前用户（可选，未登录返回 None）"""
-    if not token:
+    raw_token = token or (request.cookies.get("access_token") if request else None)
+    if not raw_token:
         return None
     
-    payload = decode_access_token(token)
+    payload = decode_access_token(raw_token)
     if payload is None:
         return None
         
@@ -60,7 +70,12 @@ def get_optional_current_user(
     if user_id is None:
         return None
         
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return None
+
+    user = db.query(User).filter(User.id == user_id_int).first()
     return user
 
 

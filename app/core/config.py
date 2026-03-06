@@ -61,12 +61,12 @@ class Settings(BaseSettings):
     # ===========================
     # 安全配置 (Security)
     # ===========================
-    SECRET_KEY: str = Field(default="insecure-key-change-me", description='JWT密钥')
+    SECRET_KEY: str = Field(default="", description='JWT密钥')
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     # CORS & Referer
-    CORS_ORIGINS: list[str] = Field(default=["*"], description="允许的跨域来源")
+    CORS_ORIGINS: list[str] = Field(default=["http://localhost:5173"], description="允许的跨域来源")
     ENABLE_REFERER_CHECK: bool = Field(default=False, description="是否开启严格Referer检查(防盗链)")
 
     # ===========================
@@ -132,6 +132,14 @@ class Settings(BaseSettings):
         """检查七牛云时间戳防盗链是否启用且已配置"""
         return self.QINIU_TIMESTAMP_ENABLED and bool(self.QINIU_TIMESTAMP_KEY)
 
+    def validate_runtime_security(self) -> None:
+        """运行时安全校验（在生产环境强制关键配置）"""
+        if self.is_production:
+            if not self.SECRET_KEY or self.SECRET_KEY == "insecure-key-change-me":
+                raise ValueError("SECRET_KEY must be configured in production")
+            if "*" in self.CORS_ORIGINS:
+                raise ValueError("CORS_ORIGINS cannot contain '*' in production")
+
 
 # ===========================
 # 加载逻辑
@@ -159,7 +167,9 @@ def get_settings() -> Settings:
 
     # 5. 实例化 Settings，传入 _env_file 参数
     # 注意：如果文件不存在，Pydantic 会默认忽略或仅使用系统环境变量
-    return Settings(_env_file=target_env_file)
+    cfg = Settings(_env_file=target_env_file)
+    cfg.validate_runtime_security()
+    return cfg
 
 
 # 全局单例

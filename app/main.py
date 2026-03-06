@@ -4,17 +4,14 @@ from fastapi.responses import JSONResponse
 import time
 import logging
 from contextlib import asynccontextmanager
+from starlette.background import BackgroundTask, BackgroundTasks
 from app.core.database import SessionLocal
 from app.models.monitor import VisitLog
 
 from app.core.config import settings
-from app.core.database import engine, Base
 from app.core.logger import setup_logging
 from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources
 from app.tasks import start_scheduler, stop_scheduler
-
-# Create database tables
-Base.metadata.create_all(bind=engine)
 
 # Setup logging
 setup_logging()
@@ -38,6 +35,31 @@ def get_location_from_ip(ip: str):
     if ip in ["127.0.0.1", "localhost", "::1"] or ip.startswith("192.168.") or ip.startswith("10."):
         return "北京", "北京"
     return "", ""
+
+
+def write_visit_log(payload: dict):
+    """Write visit log in background to avoid blocking API latency."""
+    db = SessionLocal()
+    try:
+        log = VisitLog(**payload)
+        db.add(log)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to log visit: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+def append_background_task(response, task: BackgroundTask):
+    """Preserve existing response background tasks while adding a new one."""
+    if response.background is None:
+        response.background = task
+        return
+
+    tasks = BackgroundTasks()
+    tasks.add_task(response.background)
+    tasks.add_task(task.func, *task.args, **task.kwargs)
+    response.background = tasks
 
 
 app = FastAPI(
@@ -94,31 +116,20 @@ async def log_visit(request: Request, call_next):
     if request.url.path.startswith(settings.API_V1_PREFIX) and request.method != "OPTIONS":
         # Exclude admin/monitor APIs to avoid noise
         if "/monitor/" not in request.url.path and "/admin/" not in request.url.path:
-            db = SessionLocal()
-            try:
-                # Simple IP resolution (Mock for now, or use a library if available)
-                ip = request.client.host if request.client else "unknown"
-                
-                # Resolve location
-                province, city = get_location_from_ip(ip)
-                
-                log = VisitLog(
-                    ip=ip,
-                    location=f"{province} {city}".strip(),
-                    province=province,
-                    city=city,
-                    path=request.url.path[:255],
-                    method=request.method,
-                    status_code=response.status_code,
-                    user_agent=request.headers.get("user-agent", "")[:500],
-                    process_time=process_time
-                )
-                db.add(log)
-                db.commit()
-            except Exception as e:
-                logger.error(f"Failed to log visit: {e}", exc_info=True)
-            finally:
-                db.close()
+            ip = request.client.host if request.client else "unknown"
+            province, city = get_location_from_ip(ip)
+            payload = {
+                "ip": ip,
+                "location": f"{province} {city}".strip(),
+                "province": province,
+                "city": city,
+                "path": request.url.path[:255],
+                "method": request.method,
+                "status_code": response.status_code,
+                "user_agent": request.headers.get("user-agent", "")[:500],
+                "process_time": process_time,
+            }
+            append_background_task(response, BackgroundTask(write_visit_log, payload))
                 
     return response
 

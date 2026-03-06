@@ -16,6 +16,7 @@ from app.schemas.article import (
 from app.schemas.common import ResponseModel, PagedData
 from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
 from app.core.config import get_settings, Settings
+from app.core.security import hash_protection_answer, verify_protection_answer
 
 
 router = APIRouter(prefix="/articles", tags=["文章"])
@@ -119,7 +120,7 @@ def create_article(
         is_hidden=article_in.is_hidden,
         is_protected=article_in.is_protected,
         protection_question=article_in.protection_question,
-        protection_answer=article_in.protection_answer
+        protection_answer=hash_protection_answer(article_in.protection_answer) if article_in.protection_answer else None
     )
     
     # Add tags
@@ -177,10 +178,13 @@ def update_article(
         
     if article_in.is_protected is not None:
         article.is_protected = article_in.is_protected
+        if not article_in.is_protected:
+            article.protection_question = None
+            article.protection_answer = None
     if article_in.protection_question is not None:
         article.protection_question = article_in.protection_question
     if article_in.protection_answer is not None:
-        article.protection_answer = article_in.protection_answer
+        article.protection_answer = hash_protection_answer(article_in.protection_answer) if article_in.protection_answer else None
         
     # Update tags
     if article_in.tag_ids is not None:
@@ -343,7 +347,7 @@ def get_article(
             if current_user and current_user.is_admin:
                 show_content = True
             # 验证答案
-            elif answer and answer == article.protection_answer:
+            elif answer and verify_protection_answer(answer, article.protection_answer):
                 show_content = True
         
         logger.info(f"Show content for article {article_id}: {show_content}")

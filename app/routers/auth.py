@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import logging
@@ -28,7 +28,7 @@ def generate_random_avatar() -> str:
 
 
 @router.post("/login", response_model=ResponseModel[Token])
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
+def login(user_data: UserLogin, response: Response, db: Session = Depends(get_db)):
     """用户登录"""
     user = db.query(User).filter(User.username == user_data.username).first()
     if not user or not verify_password(user_data.password, user.hashed_password):
@@ -46,6 +46,17 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     )
     
     logger.info(f"User logged in: {user.username}")
+
+    max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=max_age,
+        path="/"
+    )
     
     user_info = UserInfo(
         id=user.id,
@@ -63,6 +74,13 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         data=Token(token=access_token, userInfo=user_info),
         msg="登录成功"
     )
+
+
+@router.post("/logout", response_model=ResponseModel)
+def logout(response: Response):
+    """退出登录"""
+    response.delete_cookie(key="access_token", path="/")
+    return ResponseModel(code=200, msg="退出成功")
 
 
 @router.get("/me", response_model=ResponseModel[UserInfo])
@@ -200,10 +218,8 @@ def forgot_password(
     """忘记密码 - 发送验证码"""
     user = db.query(User).filter(User.email == request.email).first()
     if not user:
-        # 为了安全，即使邮箱不存在也提示发送成功，防止枚举邮箱
-        # 但在开发阶段，为了方便调试，可以返回真实信息，或者这里我们选择返回成功但不实际发送
-        # 实际上，为了用户体验，通常会提示邮箱未注册
-        return ResponseModel(code=404, msg="该邮箱未注册")
+        # 防止通过接口枚举邮箱
+        return ResponseModel(code=200, msg="验证码已发送至您的邮箱")
     
     # 生成6位验证码
     code = ''.join(random.choices(string.digits, k=6))
