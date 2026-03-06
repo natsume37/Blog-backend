@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     # ===========================
     # Pydantic 配置
     # ===========================
+    AI_ENABLED: bool = Field(default=True, description='是否启用 AI 文章草稿能力')
+    AI_PROVIDER: str = Field(default='openai-compatible', description='AI 提供方标识')
+    AI_BASE_URL: str | None = Field(default=None, description='AI 兼容接口基础地址，如 https://api.openai.com/v1')
+    AI_API_KEY: str | None = Field(default=None, description='AI 接口密钥')
+    AI_MODEL: str = Field(default='gpt-4o-mini', description='默认 AI 模型')
+    AI_TIMEOUT_SECONDS: int = Field(default=30, description='AI 接口超时时间（秒）')
+
     # 允许从 .env 文件读取，同时忽略多余字段
     model_config = SettingsConfigDict(
         env_file='.env',
@@ -131,6 +138,11 @@ class Settings(BaseSettings):
     def is_qiniu_timestamp_enabled(self) -> bool:
         """检查七牛云时间戳防盗链是否启用且已配置"""
         return self.QINIU_TIMESTAMP_ENABLED and bool(self.QINIU_TIMESTAMP_KEY)
+
+    @property
+    def is_ai_configured(self) -> bool:
+        """检查 AI 能力是否已配置"""
+        return bool(self.AI_ENABLED and self.AI_BASE_URL and self.AI_API_KEY and self.AI_MODEL)
 
     def validate_runtime_security(self) -> None:
         """运行时安全校验（在生产环境强制关键配置）"""
