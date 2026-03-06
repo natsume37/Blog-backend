@@ -43,3 +43,11 @@ class AIConfig(BaseModel):
     ai_api_key: str
     ai_model: str
     ai_timeout_seconds: int
+
+
+class AIConfigTestResult(BaseModel):
+    ok: bool
+    message: str
+    provider: str
+    model: str
+    latency_ms: int

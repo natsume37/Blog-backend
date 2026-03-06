@@ -1,4 +1,8 @@
 import logging
+import json
+import time
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -8,7 +12,14 @@ from app.core.deps import get_current_admin
 from app.core.database import get_db
 from app.models.site import SiteInfo
 from app.models.user import User
-from app.schemas.ai import AIDraftRequest, AIDraftResponse, AISummaryRequest, AISummaryResponse, AIConfig
+from app.schemas.ai import (
+    AIDraftRequest,
+    AIDraftResponse,
+    AISummaryRequest,
+    AISummaryResponse,
+    AIConfig,
+    AIConfigTestResult,
+)
 from app.schemas.common import ResponseModel
 from app.services.ai_article import generate_article_draft, generate_article_summary
 
@@ -74,6 +85,80 @@ def _save_ai_settings(db: Session, payload: AIConfig) -> None:
             item.value = value
 
 
+def _friendly_ai_error(exc: Exception) -> str:
+    if isinstance(exc, HTTPError):
+        return f"AI 接口返回错误（HTTP {exc.code}），请检查 Base URL、模型与 API Key。"
+    if isinstance(exc, URLError):
+        reason = str(getattr(exc, "reason", exc))
+        return f"AI 接口网络异常：{reason}"
+    if isinstance(exc, TimeoutError):
+        return "AI 请求超时，请提高 AI 超时时间或稍后重试。"
+    text = str(exc).strip()
+    if text:
+        return f"AI 生成失败：{text[:180]}"
+    return "AI 生成失败，请稍后重试。"
+
+
+def _test_ai_endpoint(runtime: Settings) -> AIConfigTestResult:
+    start = time.perf_counter()
+    if not runtime.AI_ENABLED:
+        return AIConfigTestResult(
+            ok=False,
+            message="AI 当前未启用（ai_enabled=false）",
+            provider=runtime.AI_PROVIDER,
+            model=runtime.AI_MODEL,
+            latency_ms=0,
+        )
+    if not runtime.AI_BASE_URL:
+        return AIConfigTestResult(
+            ok=False,
+            message="AI_BASE_URL 为空",
+            provider=runtime.AI_PROVIDER,
+            model=runtime.AI_MODEL,
+            latency_ms=0,
+        )
+    if not runtime.AI_API_KEY:
+        return AIConfigTestResult(
+            ok=False,
+            message="AI_API_KEY 为空",
+            provider=runtime.AI_PROVIDER,
+            model=runtime.AI_MODEL,
+            latency_ms=0,
+        )
+
+    payload = {
+        "model": runtime.AI_MODEL,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 8,
+        "temperature": 0,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    endpoint = f"{runtime.AI_BASE_URL.rstrip('/')}/chat/completions"
+    req = urllib_request.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {runtime.AI_API_KEY}",
+        },
+    )
+
+    with urllib_request.urlopen(req, timeout=runtime.AI_TIMEOUT_SECONDS) as resp:
+        if resp.status < 200 or resp.status >= 300:
+            raise RuntimeError(f"AI 接口状态码异常: {resp.status}")
+        _ = resp.read()
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    return AIConfigTestResult(
+        ok=True,
+        message="AI 连通性测试通过",
+        provider=runtime.AI_PROVIDER,
+        model=runtime.AI_MODEL,
+        latency_ms=latency_ms,
+    )
+
+
 @router.get("/config", response_model=ResponseModel[AIConfig])
 def get_ai_config(
     _: User = Depends(get_current_admin),
@@ -113,6 +198,42 @@ def update_ai_config(
     return ResponseModel(code=200, msg="AI 配置已更新", data=data)
 
 
+@router.post("/test", response_model=ResponseModel[AIConfigTestResult])
+def test_ai_config(
+    payload: AIConfig | None = None,
+    _: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        runtime = _get_ai_settings(db, settings)
+        if payload is not None:
+            runtime = runtime.model_copy(update={
+                "AI_ENABLED": payload.ai_enabled,
+                "AI_PROVIDER": payload.ai_provider.strip() or runtime.AI_PROVIDER,
+                "AI_BASE_URL": payload.ai_base_url.strip() or None,
+                "AI_API_KEY": payload.ai_api_key.strip() or None,
+                "AI_MODEL": payload.ai_model.strip() or runtime.AI_MODEL,
+                "AI_TIMEOUT_SECONDS": max(1, int(payload.ai_timeout_seconds)),
+            })
+        result = _test_ai_endpoint(runtime)
+        return ResponseModel(code=200 if result.ok else 400, msg=result.message, data=result)
+    except Exception as exc:
+        msg = _friendly_ai_error(exc)
+        logger.error("Test AI config failed: %s", exc, exc_info=True)
+        return ResponseModel(
+            code=500,
+            msg=msg,
+            data=AIConfigTestResult(
+                ok=False,
+                message=msg,
+                provider=(payload.ai_provider if payload else settings.AI_PROVIDER),
+                model=(payload.ai_model if payload else settings.AI_MODEL),
+                latency_ms=0,
+            ),
+        )
+
+
 @router.post("/article-draft", response_model=ResponseModel[AIDraftResponse])
 def create_article_draft(
     payload: AIDraftRequest,
@@ -129,7 +250,7 @@ def create_article_draft(
         return ResponseModel(code=200, msg="生成成功", data=AIDraftResponse(**data))
     except Exception as exc:
         logger.error("Generate AI draft failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg="AI 草稿生成失败，请稍后重试")
+        return ResponseModel(code=500, msg=_friendly_ai_error(exc))
 
 
 @router.post("/article-summary", response_model=ResponseModel[AISummaryResponse])
@@ -148,4 +269,4 @@ def create_article_summary(
         return ResponseModel(code=200, msg="生成成功", data=AISummaryResponse(**data))
     except Exception as exc:
         logger.error("Generate AI summary failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg="AI 摘要生成失败，请稍后重试")
+        return ResponseModel(code=500, msg=_friendly_ai_error(exc))
