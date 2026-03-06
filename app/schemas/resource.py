@@ -28,8 +28,20 @@ class ResourceList(BaseModel):
 
 class ResourceBatchDelete(BaseModel):
     ids: list[int]
+    force: bool = False
 
 
 class ResourceSyncRequest(BaseModel):
     prefix: str = ""
     limit: int = 1000
+
+
+class ResourceArticleRef(BaseModel):
+    id: int
+    title: str
+
+
+class ResourceReferences(BaseModel):
+    resource_id: int
+    key: str
+    article_refs: list[ResourceArticleRef]

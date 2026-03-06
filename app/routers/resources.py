@@ -4,8 +4,17 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user_optional, get_current_admin
 from app.models.resource import Resource
+from app.models.article import Article
 from app.models.user import User
-from app.schemas.resource import ResourceCreate, ResourceResponse, ResourceList, ResourceBatchDelete, ResourceSyncRequest
+from app.schemas.resource import (
+    ResourceCreate,
+    ResourceResponse,
+    ResourceList,
+    ResourceBatchDelete,
+    ResourceSyncRequest,
+    ResourceReferences,
+    ResourceArticleRef,
+)
 from app.schemas.common import ResponseModel, PagedData
 from app.core.cache import RedisClient
 from app.core.config import get_settings, Settings
@@ -42,6 +51,20 @@ def _guess_media_type(key: str, mime_type: Optional[str]) -> str:
     if lower_key.startswith("audio/"):
         return "audio"
     return "other"
+
+
+def _find_referenced_articles(db: Session, key: str, url: str):
+    return (
+        db.query(Article)
+        .filter(
+            (Article.content.contains(key))
+            | (Article.cover.contains(key))
+            | (Article.content.contains(url))
+            | (Article.cover.contains(url))
+        )
+        .limit(50)
+        .all()
+    )
 
 @router.post("", response_model=ResponseModel[ResourceResponse])
 def create_resource(
@@ -136,6 +159,7 @@ def get_resources(
 def delete_resource(
     id: int,
     request: Request,
+    force: bool = Query(False, description="是否强制删除（忽略引用关系）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings),
@@ -144,6 +168,17 @@ def delete_resource(
     resource = db.query(Resource).filter(Resource.id == id).first()
     if not resource:
         raise HTTPException(status_code=404, detail="资源不存在")
+
+    refs = _find_referenced_articles(db, resource.key, resource.url)
+    if refs and not force:
+        return ResponseModel(
+            code=409,
+            msg=f"资源正在被 {len(refs)} 篇文章引用，请先替换引用后再删，或使用强制删除。",
+            data={
+                "ref_count": len(refs),
+                "articles": [{"id": a.id, "title": a.title} for a in refs[:10]],
+            },
+        )
     
     # 1. 删除七牛云文件
     try:
@@ -205,8 +240,18 @@ def batch_delete_resource(
         bucket = BucketManager(q)
 
     deleted = 0
+    skipped_refs: list[dict] = []
     qiniu_failed = 0
     for resource in resources:
+        refs = _find_referenced_articles(db, resource.key, resource.url)
+        if refs and not payload.force:
+            skipped_refs.append({
+                "id": resource.id,
+                "key": resource.key,
+                "ref_count": len(refs),
+            })
+            continue
+
         if bucket:
             try:
                 _ret, info = bucket.delete(settings.QINIU_BUCKET, resource.key)
@@ -230,12 +275,24 @@ def batch_delete_resource(
         target_id=",".join(str(i) for i in payload.ids[:20]),
         description=f"批量删除资源 {deleted} 个",
         request=request,
-        extra={"count": deleted, "qiniu_failed": qiniu_failed, "ids": payload.ids},
+        extra={
+            "count": deleted,
+            "qiniu_failed": qiniu_failed,
+            "ids": payload.ids,
+            "force": payload.force,
+            "skipped_refs": skipped_refs,
+        },
     )
     msg = f"批量删除完成，共 {deleted} 个"
+    if skipped_refs:
+        msg += f"，{len(skipped_refs)} 个因存在引用被跳过"
     if qiniu_failed > 0:
         msg += f"，其中 {qiniu_failed} 个七牛删除失败"
-    return ResponseModel(code=200, msg=msg, data={"deleted": deleted, "qiniu_failed": qiniu_failed})
+    return ResponseModel(
+        code=200,
+        msg=msg,
+        data={"deleted": deleted, "qiniu_failed": qiniu_failed, "skipped_refs": skipped_refs},
+    )
 
 
 @router.post("/admin/sync-qiniu", response_model=ResponseModel)
@@ -334,4 +391,26 @@ def sync_resources_from_qiniu(
         code=200,
         msg=f"同步完成：扫描 {scanned}，新增 {created}，更新 {updated}",
         data={"scanned": scanned, "created": created, "updated": updated},
+    )
+
+
+@router.get("/{id}/references", response_model=ResponseModel[ResourceReferences])
+def get_resource_references(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """查询资源引用关系（当前仅追踪文章内容/封面）"""
+    resource = db.query(Resource).filter(Resource.id == id).first()
+    if not resource:
+        return ResponseModel(code=404, msg="资源不存在")
+
+    refs = _find_referenced_articles(db, resource.key, resource.url)
+    return ResponseModel(
+        code=200,
+        data=ResourceReferences(
+            resource_id=resource.id,
+            key=resource.key,
+            article_refs=[ResourceArticleRef(id=item.id, title=item.title) for item in refs],
+        ),
     )
