@@ -4,7 +4,7 @@
 import platform
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import psutil
@@ -14,6 +14,8 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_admin
+from app.models.article import Article
+from app.models.comment import Comment
 from app.models.user import User
 from app.models.monitor import VisitLog
 from app.schemas.common import ResponseModel, PagedData
@@ -166,6 +168,76 @@ def get_map_stats(
 
     result = [{"name": k, "value": v} for k, v in merged.items()]
     return ResponseModel(code=200, data=result)
+
+
+@router.get("/dashboard", response_model=ResponseModel)
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """获取后台仪表盘关键指标"""
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    seven_days_start = today_start - timedelta(days=6)
+
+    today_visits = db.query(func.count(VisitLog.id)).filter(
+        VisitLog.created_at >= today_start
+    ).scalar() or 0
+
+    draft_count = db.query(func.count(Article.id)).filter(
+        Article.is_published == False
+    ).scalar() or 0
+
+    pending_comments = db.query(func.count(Comment.id)).filter(
+        Comment.is_approved == False
+    ).scalar() or 0
+
+    hot_articles_raw = db.query(
+        Article.id,
+        Article.title,
+        Article.view_count,
+        Article.comment_count
+    ).filter(
+        Article.is_published == True
+    ).order_by(
+        Article.view_count.desc(),
+        Article.comment_count.desc(),
+        Article.id.desc()
+    ).limit(5).all()
+
+    hot_articles = [{
+        "id": int(row.id),
+        "title": row.title,
+        "view_count": int(row.view_count or 0),
+        "comment_count": int(row.comment_count or 0)
+    } for row in hot_articles_raw]
+
+    trend_raw = db.query(
+        func.date(VisitLog.created_at).label("day"),
+        func.count(VisitLog.id).label("count")
+    ).filter(
+        VisitLog.created_at >= seven_days_start
+    ).group_by(
+        func.date(VisitLog.created_at)
+    ).all()
+
+    trend_map = {str(row.day): int(row.count or 0) for row in trend_raw}
+    visit_trend = []
+    for i in range(7):
+        day = seven_days_start + timedelta(days=i)
+        key = day.strftime("%Y-%m-%d")
+        visit_trend.append({
+            "date": key,
+            "count": trend_map.get(key, 0)
+        })
+
+    return ResponseModel(code=200, data={
+        "today_visits": int(today_visits),
+        "draft_count": int(draft_count),
+        "pending_comments": int(pending_comments),
+        "visit_trend_7d": visit_trend,
+        "hot_articles": hot_articles
+    })
 
 
 def get_disk_path() -> str:
