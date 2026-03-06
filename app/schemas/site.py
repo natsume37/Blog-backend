@@ -42,3 +42,25 @@ class SiteConfig(BaseModel):
     class Config:
         from_attributes = True
 
+
+class MailConfig(BaseModel):
+    smtpHost: str
+    smtpPort: int
+    smtpUser: str
+    smtpPassword: str
+    emailsFromEmail: str
+    emailsFromName: str
+
+
+class MailTestRequest(BaseModel):
+    emailTo: str
+
+
+class MailTestPayload(BaseModel):
+    smtpHost: str
+    smtpPort: int
+    smtpUser: str
+    smtpPassword: str
+    emailsFromEmail: str
+    emailsFromName: str
+    emailTo: str

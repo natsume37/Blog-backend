@@ -1,16 +1,22 @@
 from datetime import datetime
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.header import Header
+from email.utils import formataddr
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_current_admin
+from app.core.config import settings
 from app.core.cache import redis_client
 from app.models.article import Article, Tag
 from app.models.site import SiteInfo
 from app.models.user import User
-from app.schemas.site import SiteStats, SiteConfig
+from app.schemas.site import SiteStats, SiteConfig, MailConfig, MailTestPayload
 from app.schemas.common import ResponseModel
 
 
@@ -19,6 +25,20 @@ router = APIRouter(prefix="/site", tags=["站点"])
 
 # Site start date (you can change this)
 SITE_START_DATE = datetime(2025, 11, 27)
+
+
+def _get_site_val(db: Session, key: str, default: str) -> str:
+    item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
+    return item.value if item else default
+
+
+def _set_site_val(db: Session, key: str, value: str) -> None:
+    item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
+    if not item:
+        item = SiteInfo(key=key, value=value)
+        db.add(item)
+    else:
+        item.value = value
 
 
 @router.get("/info", response_model=ResponseModel[SiteStats])
@@ -58,8 +78,7 @@ def get_site_config(db: Session = Depends(get_db)):
 
     # Helper to get value or default
     def get_val(key, default):
-        item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
-        return item.value if item else default
+        return _get_site_val(db, key, default)
 
     # Defaults
     default_sentences = json.dumps(["相信美好，遇见美好。", "生活明朗，万物可爱。", "保持热爱，奔赴山海。"], ensure_ascii=False)
@@ -107,12 +126,7 @@ def update_site_config(
         return ResponseModel(code=403, msg="权限不足")
         
     def set_val(key, value):
-        item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
-        if not item:
-            item = SiteInfo(key=key, value=str(value))
-            db.add(item)
-        else:
-            item.value = str(value)
+        _set_site_val(db, key, str(value))
     
     set_val("site_name", config.siteName)
     set_val("site_description", config.siteDescription)
@@ -137,3 +151,66 @@ def update_site_config(
     redis_client.delete("site_config")
     
     return ResponseModel(code=200, data=config, msg="配置已更新")
+
+
+@router.get("/mail-config", response_model=ResponseModel[MailConfig])
+def get_mail_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    data = MailConfig(
+        smtpHost=_get_site_val(db, "mail_smtp_host", settings.SMTP_HOST),
+        smtpPort=int(_get_site_val(db, "mail_smtp_port", str(settings.SMTP_PORT))),
+        smtpUser=_get_site_val(db, "mail_smtp_user", settings.SMTP_USER),
+        smtpPassword=_get_site_val(db, "mail_smtp_password", settings.SMTP_PASSWORD),
+        emailsFromEmail=_get_site_val(db, "mail_from_email", settings.EMAILS_FROM_EMAIL),
+        emailsFromName=_get_site_val(db, "mail_from_name", settings.EMAILS_FROM_NAME),
+    )
+    return ResponseModel(code=200, data=data)
+
+
+@router.put("/mail-config", response_model=ResponseModel[MailConfig])
+def update_mail_config(
+    payload: MailConfig,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    _set_site_val(db, "mail_smtp_host", payload.smtpHost.strip())
+    _set_site_val(db, "mail_smtp_port", str(payload.smtpPort))
+    _set_site_val(db, "mail_smtp_user", payload.smtpUser.strip())
+    _set_site_val(db, "mail_smtp_password", payload.smtpPassword)
+    _set_site_val(db, "mail_from_email", payload.emailsFromEmail.strip())
+    _set_site_val(db, "mail_from_name", payload.emailsFromName.strip())
+    db.commit()
+    return ResponseModel(code=200, msg="邮件配置已保存", data=payload)
+
+
+@router.post("/mail-config/test", response_model=ResponseModel)
+def test_mail_config(
+    payload: MailTestPayload,
+    current_user: User = Depends(get_current_admin)
+):
+    try:
+        msg = MIMEMultipart()
+        from_name = payload.emailsFromName
+        try:
+            from_name.encode("ascii")
+        except UnicodeEncodeError:
+            from_name = Header(from_name, "utf-8").encode()
+
+        msg["From"] = formataddr((from_name, payload.emailsFromEmail))
+        msg["To"] = formataddr((None, payload.emailTo))
+        msg["Subject"] = Header("博客后台邮件配置测试", "utf-8")
+        msg.attach(MIMEText("这是一封测试邮件，说明当前 SMTP 配置可用。", "plain", "utf-8"))
+
+        if payload.smtpPort == 465:
+            server = smtplib.SMTP_SSL(payload.smtpHost, payload.smtpPort, timeout=10)
+        else:
+            server = smtplib.SMTP(payload.smtpHost, payload.smtpPort, timeout=10)
+            server.starttls()
+        server.login(payload.smtpUser, payload.smtpPassword)
+        server.sendmail(payload.emailsFromEmail, [payload.emailTo], msg.as_string())
+        server.quit()
+        return ResponseModel(code=200, msg=f"测试邮件已发送到 {payload.emailTo}")
+    except Exception as e:
+        return ResponseModel(code=500, msg=f"测试失败: {e}")

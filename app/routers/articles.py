@@ -28,6 +28,7 @@ def get_admin_articles(
     current: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
     keyword: Optional[str] = None,
+    status: Optional[str] = Query(None, description="all|draft|recycle"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings)
@@ -37,6 +38,11 @@ def get_admin_articles(
     
     if keyword:
         query = query.filter(Article.title.contains(keyword))
+
+    if status == "draft":
+        query = query.filter(Article.is_published == False, Article.is_hidden == False)
+    elif status == "recycle":
+        query = query.filter(Article.is_hidden == True)
         
     query = query.order_by(Article.created_at.desc())
     

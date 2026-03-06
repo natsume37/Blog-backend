@@ -189,6 +189,22 @@ def get_admin_comments(
     )
 
 
+@router.get("/admin/stats", response_model=ResponseModel)
+def get_admin_comment_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """获取评论统计（管理员）"""
+    total = db.query(func.count(Comment.id)).scalar() or 0
+    approved = db.query(func.count(Comment.id)).filter(Comment.is_approved == True).scalar() or 0
+    pending = db.query(func.count(Comment.id)).filter(Comment.is_approved == False).scalar() or 0
+    return ResponseModel(code=200, data={
+        "total": int(total),
+        "approved": int(approved),
+        "pending": int(pending),
+    })
+
+
 @router.get("/{content_type}/{content_id}", response_model=ResponseModel)
 def get_comments_by_content(
     content_type: str,
