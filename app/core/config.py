@@ -107,9 +107,10 @@ class Settings(BaseSettings):
     # ===========================
     GEOIP_ENABLED: bool = Field(default=False, description='是否启用公网IP地理位置解析')
     GEOIP_PROVIDER_URL: str = Field(
-        default='https://ipwho.is/{ip}',
+        default='https://api.ip2location.io/?ip={ip}',
         description='GeoIP 提供方 URL，支持 {ip} 占位符'
     )
+    GEOIP_API_KEY: str | None = Field(default=None, description='GeoIP 提供方可选 API Key')
     GEOIP_TIMEOUT_SECONDS: float = Field(default=1.5, description='GeoIP 请求超时时间（秒）')
 
     # 允许从 .env 文件读取，同时忽略多余字段

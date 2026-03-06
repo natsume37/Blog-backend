@@ -8,6 +8,7 @@ import json
 from functools import lru_cache
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask, BackgroundTasks
 from app.core.database import SessionLocal
@@ -38,12 +39,18 @@ def _resolve_public_ip_location(ip: str) -> tuple[str, str]:
         return "", ""
 
     url = settings.GEOIP_PROVIDER_URL.replace("{ip}", ip)
+    if settings.GEOIP_API_KEY:
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query.setdefault("key", settings.GEOIP_API_KEY)
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
     timeout = max(0.2, float(settings.GEOIP_TIMEOUT_SECONDS))
     req = urlopen(url, timeout=timeout)
     with req:
         payload = json.loads(req.read().decode("utf-8", errors="ignore"))
 
-    # Support common response formats. Primary target: ipwho.is
+    # Support common response formats. Primary target: ip2location / ipwho.is
     if isinstance(payload, dict):
         success = payload.get("success")
         if success is False:
@@ -55,7 +62,7 @@ def _resolve_public_ip_location(ip: str) -> tuple[str, str]:
             or payload.get("region_name")
             or ""
         ).strip()
-        city = str(payload.get("city") or "").strip()
+        city = str(payload.get("city") or payload.get("city_name") or "").strip()
         return province, city
 
     return "", ""
