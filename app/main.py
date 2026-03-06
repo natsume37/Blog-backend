@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import time
 import logging
+import ipaddress
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask, BackgroundTasks
 from app.core.database import SessionLocal
@@ -32,9 +33,31 @@ def get_location_from_ip(ip: str):
     Simple IP to location resolver.
     In production, use a library like ip2region or GeoLite2.
     """
-    if ip in ["127.0.0.1", "localhost", "::1"] or ip.startswith("192.168.") or ip.startswith("10."):
-        return "北京", "北京"
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            return "内网", "局域网"
+    except ValueError:
+        if ip in ["127.0.0.1", "localhost", "::1"] or ip.startswith("192.168.") or ip.startswith("10."):
+            return "内网", "局域网"
+
     return "", ""
+
+
+def get_client_ip(request: Request) -> str:
+    """Resolve client IP behind reverse proxy."""
+    header_candidates = [
+        request.headers.get("x-forwarded-for"),
+        request.headers.get("x-real-ip"),
+        request.headers.get("cf-connecting-ip"),
+    ]
+    for value in header_candidates:
+        if not value:
+            continue
+        first = value.split(",")[0].strip()
+        if first and first.lower() != "unknown":
+            return first
+    return request.client.host if request.client else "unknown"
 
 
 def write_visit_log(payload: dict):
@@ -116,7 +139,7 @@ async def log_visit(request: Request, call_next):
     if request.url.path.startswith(settings.API_V1_PREFIX) and request.method != "OPTIONS":
         # Exclude admin/monitor APIs to avoid noise
         if "/monitor/" not in request.url.path and "/admin/" not in request.url.path:
-            ip = request.client.host if request.client else "unknown"
+            ip = get_client_ip(request)
             province, city = get_location_from_ip(ip)
             payload = {
                 "ip": ip,
