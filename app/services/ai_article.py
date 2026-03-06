@@ -4,7 +4,7 @@ from typing import Any
 from urllib import request as urllib_request
 
 from app.core.config import Settings
-from app.schemas.ai import AIDraftRequest
+from app.schemas.ai import AIDraftRequest, AISummaryRequest
 
 
 def _build_payload(data: AIDraftRequest) -> dict[str, Any]:
@@ -111,6 +111,79 @@ def generate_article_draft(data: AIDraftRequest, settings: Settings) -> dict[str
         "summary": parsed.get("summary") or "",
         "content_markdown": parsed.get("content_markdown") or "",
         "tags_suggestion": parsed.get("tags_suggestion") or [],
+        "provider": settings.AI_PROVIDER,
+        "model": settings.AI_MODEL,
+    }
+
+
+def _strip_markdown(text: str) -> str:
+    # 粗略清理 markdown 标记，保证 fallback 场景可读
+    cleaned = text.replace("`", "").replace("*", "").replace("#", "")
+    cleaned = cleaned.replace(">", "").replace("-", " ").replace("_", " ")
+    return " ".join(cleaned.split())
+
+
+def _fallback_summary(data: AISummaryRequest, settings: Settings) -> dict[str, Any]:
+    plain = _strip_markdown(data.content_markdown)
+    summary = plain[: data.max_length].strip()
+    if len(plain) > data.max_length:
+        summary += "..."
+    return {
+        "summary": summary or (data.title[: data.max_length] if data.title else "暂无摘要"),
+        "provider": settings.AI_PROVIDER,
+        "model": settings.AI_MODEL,
+    }
+
+
+def generate_article_summary(data: AISummaryRequest, settings: Settings) -> dict[str, Any]:
+    if not settings.is_ai_configured:
+        return _fallback_summary(data, settings)
+
+    system_prompt = (
+        "你是资深中文技术编辑。"
+        "请输出 JSON，不要输出 markdown 代码块。"
+        "JSON 字段必须包含: summary。"
+    )
+    user_prompt = (
+        f"标题: {data.title or '无'}\n"
+        f"风格: {data.style}\n"
+        f"摘要最大长度: {data.max_length} 字\n"
+        f"正文:\n{data.content_markdown}\n"
+    )
+    payload = {
+        "model": settings.AI_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    endpoint = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
+    req = urllib_request.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.AI_API_KEY}",
+        },
+    )
+    with urllib_request.urlopen(req, timeout=settings.AI_TIMEOUT_SECONDS) as resp:
+        raw = resp.read().decode("utf-8")
+        data_json = json.loads(raw)
+    content = (
+        data_json.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    parsed = json.loads(content)
+    summary = (parsed.get("summary") or "").strip()
+    if len(summary) > data.max_length:
+        summary = summary[: data.max_length].rstrip() + "..."
+    return {
+        "summary": summary or _fallback_summary(data, settings)["summary"],
         "provider": settings.AI_PROVIDER,
         "model": settings.AI_MODEL,
     }

@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends
 from app.core.config import Settings, get_settings
 from app.core.deps import get_current_admin
 from app.models.user import User
-from app.schemas.ai import AIDraftRequest, AIDraftResponse
+from app.schemas.ai import AIDraftRequest, AIDraftResponse, AISummaryRequest, AISummaryResponse
 from app.schemas.common import ResponseModel
-from app.services.ai_article import generate_article_draft
+from app.services.ai_article import generate_article_draft, generate_article_summary
 
 
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -29,3 +29,20 @@ def create_article_draft(
     except Exception as exc:
         logger.error("Generate AI draft failed: %s", exc, exc_info=True)
         return ResponseModel(code=500, msg="AI 草稿生成失败，请稍后重试")
+
+
+@router.post("/article-summary", response_model=ResponseModel[AISummaryResponse])
+def create_article_summary(
+    payload: AISummaryRequest,
+    _: User = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings),
+):
+    """生成文章摘要（管理员）"""
+    try:
+        data = generate_article_summary(payload, settings)
+        if not data.get("summary"):
+            return ResponseModel(code=502, msg="AI 返回摘要为空")
+        return ResponseModel(code=200, msg="生成成功", data=AISummaryResponse(**data))
+    except Exception as exc:
+        logger.error("Generate AI summary failed: %s", exc, exc_info=True)
+        return ResponseModel(code=500, msg="AI 摘要生成失败，请稍后重试")

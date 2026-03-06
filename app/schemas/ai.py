@@ -21,3 +21,16 @@ class AIDraftResponse(BaseModel):
     tags_suggestion: List[str] = Field(default_factory=list)
     provider: str
     model: str
+
+
+class AISummaryRequest(BaseModel):
+    title: str = Field(default="", max_length=200, description="文章标题")
+    content_markdown: str = Field(..., min_length=20, max_length=100000, description="Markdown 正文")
+    max_length: int = Field(default=140, ge=40, le=400, description="摘要最大长度（字符）")
+    style: str = Field(default="简洁专业", max_length=40, description="摘要风格")
+
+
+class AISummaryResponse(BaseModel):
+    summary: str
+    provider: str
+    model: str

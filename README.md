@@ -30,26 +30,27 @@ uv sync
 CREATE DATABASE blog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 4. Configure database
+### 4. Configure environment (uv + env files)
 
-The default configuration is:
+This project reads config by `ENVIRONMENT`:
 
-- Host: localhost
-- Port: 3306
-- User: root
-- Password: 123
-- Database: blog
+- `development` -> `.env.dev`
+- `production` -> `.env.prod`
+- `staging` -> `.env.staging`
 
-You can override these by creating a `.env` file:
+Create your env files from templates:
 
-```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=123
-DB_NAME=blog
-SECRET_KEY=your-secret-key-here
+```bash
+cp .env.dev.example .env.dev
+cp .env.prod.example .env.prod
 ```
+
+Important production fields:
+
+- `SECRET_KEY`
+- `DATABASE_URL`
+- `CORS_ORIGINS`
+- `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
 
 ### 5. Create Admin Account
 
@@ -64,26 +65,55 @@ uv run python scripts/create_admin.py -i
 uv run python scripts/create_admin.py -u myusername -e myemail@example.com -p mypassword -n "My Nickname"
 ```
 
-### 6. Run the server
+### 6. Run with uv
+
+Use the helper script (recommended):
 
 ```bash
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# development (reload on)
+./scripts/uv-run.sh dev
+
+# production (reload off)
+./scripts/uv-run.sh prod
 ```
 
-# Or if uv command has issues, use venv directly:
+Or run directly:
 
 ```bash
-.\.venv\Scripts\activate  # Windows
-source .venv/bin/activate # Linux/Mac
-python -m uvicorn app.main:app --reload
+ENVIRONMENT=development uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8090
+ENVIRONMENT=production uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
+
+### 7. systemd (production)
+
+Use `EnvironmentFile` so backend env is managed in one place:
+
+```ini
+[Unit]
+Description=FastAPI Blog Backend
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/root/work/blog/Blog-backend
+EnvironmentFile=/root/work/blog/Blog-backend/.env.prod
+Environment=ENVIRONMENT=production
+ExecStart=/usr/local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Tip: use `which uv` on server and replace `/usr/local/bin/uv` if your path differs.
 
 ## API Documentation
 
 Once the server is running, visit:
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:8090/docs
+- ReDoc: http://localhost:8090/redoc
 
 ## Project Structure
 
