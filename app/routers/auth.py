@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, Request
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import logging
@@ -8,6 +8,7 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.user import User
+from app.models.login_log import LoginLog
 from app.schemas.user import UserCreate, UserLogin, UserInfo, Token, UserUpdate, ForgotPasswordRequest, ResetPasswordRequest, UserRegister
 from app.schemas.common import ResponseModel
 from app.core.cache import RedisClient
@@ -17,6 +18,44 @@ import string
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 logger = logging.getLogger(__name__)
+
+
+def _get_client_ip(request: Request) -> str:
+    header_candidates = [
+        request.headers.get("x-forwarded-for"),
+        request.headers.get("x-real-ip"),
+        request.headers.get("cf-connecting-ip"),
+    ]
+    for value in header_candidates:
+        if not value:
+            continue
+        first = value.split(",")[0].strip()
+        if first and first.lower() != "unknown":
+            return first
+    return request.client.host if request.client else ""
+
+
+def _record_login_log(
+    db: Session,
+    request: Request,
+    username: str,
+    success: bool,
+    reason: str = "",
+    user_id: int | None = None,
+) -> None:
+    try:
+        db.add(LoginLog(
+            user_id=user_id,
+            username=(username or "")[:64],
+            ip=_get_client_ip(request)[:50],
+            user_agent=request.headers.get("user-agent", "")[:500],
+            success=success,
+            reason=reason[:255],
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Record login log failed: %s", e)
 
 # 随机头像生成函数
 def generate_random_avatar() -> str:
@@ -28,15 +67,17 @@ def generate_random_avatar() -> str:
 
 
 @router.post("/login", response_model=ResponseModel[Token])
-def login(user_data: UserLogin, response: Response, db: Session = Depends(get_db)):
+def login(user_data: UserLogin, request: Request, response: Response, db: Session = Depends(get_db)):
     """用户登录"""
     user = db.query(User).filter(User.username == user_data.username).first()
     if not user or not verify_password(user_data.password, user.hashed_password):
         logger.warning(f"Login failed for user: {user_data.username}")
+        _record_login_log(db, request, user_data.username, False, "用户名或密码错误")
         return ResponseModel(code=401, msg="用户名或密码错误")
     
     if not user.is_active:
         logger.warning(f"Login attempt for inactive user: {user_data.username}")
+        _record_login_log(db, request, user.username, False, "账号已被禁用", user.id)
         return ResponseModel(code=403, msg="账号已被禁用")
     
     # Create token
@@ -46,6 +87,7 @@ def login(user_data: UserLogin, response: Response, db: Session = Depends(get_db
     )
     
     logger.info(f"User logged in: {user.username}")
+    _record_login_log(db, request, user.username, True, "登录成功", user.id)
 
     max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     response.set_cookie(
