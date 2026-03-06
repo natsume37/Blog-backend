@@ -1,10 +1,55 @@
 import json
+import re
 from datetime import datetime
 from typing import Any
 from urllib import request as urllib_request
 
 from app.core.config import Settings
 from app.schemas.ai import AIDraftRequest, AISummaryRequest
+
+
+def _content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _extract_json_dict(raw_text: str) -> dict[str, Any] | None:
+    text = (raw_text or "").strip()
+    if not text:
+        return None
+
+    # 兼容 ```json ... ``` 代码块格式
+    fence = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", text, flags=re.IGNORECASE | re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    # 兼容前后夹杂说明文字的场景，尝试从任意位置解码首个 JSON 对象
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[i:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def _build_payload(data: AIDraftRequest) -> dict[str, Any]:
@@ -99,13 +144,23 @@ def generate_article_draft(data: AIDraftRequest, settings: Settings) -> dict[str
     with urllib_request.urlopen(req, timeout=settings.AI_TIMEOUT_SECONDS) as resp:
         raw = resp.read().decode("utf-8")
         data_json = json.loads(raw)
-    content = (
+    content = _content_to_text(
         data_json.get("choices", [{}])[0]
         .get("message", {})
         .get("content", "")
-        .strip()
     )
-    parsed = json.loads(content)
+    parsed = _extract_json_dict(content)
+    if not parsed:
+        # 非结构化内容时回退：尽量保留 AI 返回正文，避免直接报错
+        fallback = _fallback_draft(data, settings)
+        return {
+            "title": data.topic,
+            "summary": fallback["summary"] if data.include_summary else "",
+            "content_markdown": content or fallback["content_markdown"],
+            "tags_suggestion": fallback["tags_suggestion"],
+            "provider": settings.AI_PROVIDER,
+            "model": settings.AI_MODEL,
+        }
     return {
         "title": parsed.get("title") or data.topic,
         "summary": parsed.get("summary") or "",
@@ -172,14 +227,15 @@ def generate_article_summary(data: AISummaryRequest, settings: Settings) -> dict
     with urllib_request.urlopen(req, timeout=settings.AI_TIMEOUT_SECONDS) as resp:
         raw = resp.read().decode("utf-8")
         data_json = json.loads(raw)
-    content = (
+    content = _content_to_text(
         data_json.get("choices", [{}])[0]
         .get("message", {})
         .get("content", "")
-        .strip()
     )
-    parsed = json.loads(content)
-    summary = (parsed.get("summary") or "").strip()
+    parsed = _extract_json_dict(content)
+    summary = (parsed.get("summary") or "").strip() if parsed else ""
+    if not summary and content:
+        summary = _strip_markdown(content).strip()
     if len(summary) > data.max_length:
         summary = summary[: data.max_length].rstrip() + "..."
     return {
