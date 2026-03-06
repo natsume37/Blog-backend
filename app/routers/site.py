@@ -16,7 +16,7 @@ from app.core.cache import redis_client
 from app.models.article import Article, Tag
 from app.models.site import SiteInfo
 from app.models.user import User
-from app.schemas.site import SiteStats, SiteConfig, MailConfig, MailTestPayload
+from app.schemas.site import SiteStats, SiteConfig, MailConfig, MailTestPayload, CommentRiskConfig
 from app.schemas.common import ResponseModel
 from app.utils.audit import record_admin_action
 
@@ -40,6 +40,17 @@ def _set_site_val(db: Session, key: str, value: str) -> None:
         db.add(item)
     else:
         item.value = value
+
+
+def _get_json_list(db: Session, key: str) -> list[str]:
+    raw = _get_site_val(db, key, "[]")
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [str(item).strip() for item in data if str(item).strip()]
+    except Exception:
+        pass
+    return []
 
 
 @router.get("/info", response_model=ResponseModel[SiteStats])
@@ -252,3 +263,39 @@ def test_mail_config(
             extra={"error": str(e)},
         )
         return ResponseModel(code=500, msg=f"测试失败: {e}")
+
+
+@router.get("/comment-risk-config", response_model=ResponseModel[CommentRiskConfig])
+def get_comment_risk_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    data = CommentRiskConfig(
+        sensitiveWords=_get_json_list(db, "comment_sensitive_words"),
+        blockedIps=_get_json_list(db, "comment_blocked_ips"),
+        autoRejectEnabled=_get_site_val(db, "comment_auto_reject_enabled", "false") == "true",
+    )
+    return ResponseModel(code=200, data=data)
+
+
+@router.put("/comment-risk-config", response_model=ResponseModel[CommentRiskConfig])
+def update_comment_risk_config(
+    payload: CommentRiskConfig,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    _set_site_val(db, "comment_sensitive_words", json.dumps(payload.sensitiveWords, ensure_ascii=False))
+    _set_site_val(db, "comment_blocked_ips", json.dumps(payload.blockedIps, ensure_ascii=False))
+    _set_site_val(db, "comment_auto_reject_enabled", "true" if payload.autoRejectEnabled else "false")
+    db.commit()
+    record_admin_action(
+        user=current_user,
+        action="comment.risk.update",
+        target_type="comment_risk_config",
+        target_id="global",
+        description="更新评论风控配置",
+        request=request,
+        extra={"words": len(payload.sensitiveWords), "blocked_ips": len(payload.blockedIps), "auto_reject": payload.autoRejectEnabled},
+    )
+    return ResponseModel(code=200, msg="评论风控配置已保存", data=payload)

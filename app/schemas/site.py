@@ -64,3 +64,9 @@ class MailTestPayload(BaseModel):
     emailsFromEmail: str
     emailsFromName: str
     emailTo: str
+
+
+class CommentRiskConfig(BaseModel):
+    sensitiveWords: List[str] = []
+    blockedIps: List[str] = []
+    autoRejectEnabled: bool = False

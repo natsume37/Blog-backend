@@ -2,6 +2,7 @@
 评论 API 路由
 """
 from typing import Optional, List
+import json
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
@@ -11,6 +12,7 @@ from app.core.deps import get_current_user, get_current_admin, get_optional_curr
 from app.models.user import User
 from app.models.article import Article, CommentLike
 from app.models.comment import Comment
+from app.models.site import SiteInfo
 from app.schemas.comment import (
     CommentCreate, CommentUpdate, CommentResponse, 
     CommentReply, CommentUser, CommentAdminItem
@@ -20,6 +22,37 @@ from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/comments", tags=["评论"])
+
+
+def _get_client_ip(request: Request) -> str:
+    header_candidates = [
+        request.headers.get("x-forwarded-for"),
+        request.headers.get("x-real-ip"),
+        request.headers.get("cf-connecting-ip"),
+    ]
+    for value in header_candidates:
+        if not value:
+            continue
+        first = value.split(",")[0].strip()
+        if first and first.lower() != "unknown":
+            return first
+    return request.client.host if request.client else ""
+
+
+def _get_site_value(db: Session, key: str, default: str = "") -> str:
+    item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
+    return item.value if item else default
+
+
+def _get_site_list(db: Session, key: str) -> list[str]:
+    raw = _get_site_value(db, key, "[]")
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [str(item).strip() for item in data if str(item).strip()]
+    except Exception:
+        pass
+    return []
 
 
 def build_comment_user(user: User) -> CommentUser:
@@ -71,6 +104,7 @@ def build_comment_response(
 @router.post("", response_model=ResponseModel)
 def create_comment(
     comment_in: CommentCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -79,6 +113,15 @@ def create_comment(
     valid_content_types = ["article", "changelog", "message_board"]
     if comment_in.content_type not in valid_content_types:
         return ResponseModel(code=400, msg="无效的内容类型")
+
+    client_ip = _get_client_ip(request)
+    blocked_ips = _get_site_list(db, "comment_blocked_ips")
+    if client_ip and client_ip in blocked_ips:
+        return ResponseModel(code=403, msg="当前 IP 已被限制发表评论")
+
+    auto_reject = _get_site_value(db, "comment_auto_reject_enabled", "false") == "true"
+    sensitive_words = _get_site_list(db, "comment_sensitive_words")
+    hit_sensitive = next((w for w in sensitive_words if w and w.lower() in comment_in.content.lower()), None)
     
     # 如果是文章评论，验证文章存在
     article = None
@@ -103,7 +146,8 @@ def create_comment(
         content_id=comment_in.content_id,
         user_id=current_user.id,
         parent_id=comment_in.parent_id,
-        reply_to_id=comment_in.reply_to_id
+        reply_to_id=comment_in.reply_to_id,
+        is_approved=False if (auto_reject and hit_sensitive) else True,
     )
     
     db.add(comment)
@@ -117,7 +161,7 @@ def create_comment(
     
     return ResponseModel(
         code=200, 
-        msg="评论成功",
+        msg="评论成功，待审核" if (auto_reject and hit_sensitive) else "评论成功",
         data={"id": comment.id}
     )
 
