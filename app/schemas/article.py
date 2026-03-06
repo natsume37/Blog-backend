@@ -86,6 +86,11 @@ class ArticleUpdate(BaseModel):
     protection_answer: Optional[str] = None
 
 
+class ArticleBatchAction(BaseModel):
+    ids: List[int]
+    action: str  # publish | unpublish | recycle | restore | delete
+
+
 class ArticleListItem(BaseModel):
     id: int
     title: str

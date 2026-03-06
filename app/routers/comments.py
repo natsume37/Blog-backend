@@ -294,7 +294,7 @@ def delete_comment(
         return ResponseModel(code=404, msg="评论不存在")
     
     # 权限检查
-    if comment.user_id != current_user.id and current_user.role != "admin":
+    if comment.user_id != current_user.id and not current_user.is_admin:
         return ResponseModel(code=403, msg="无权删除此评论")
     
     # 获取文章以更新评论数

@@ -11,7 +11,7 @@ from app.models.article import Article, Category, Tag, article_tags, ArticleLike
 from app.models.user import User
 from app.schemas.article import (
     ArticleListItem, ArticleDetail, CategoryResponse, TagResponse,
-    ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles
+    ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles, ArticleBatchAction
 )
 from app.schemas.common import ResponseModel, PagedData
 from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
@@ -255,6 +255,103 @@ def delete_article(
     )
     
     return ResponseModel(code=200, msg="删除成功")
+
+
+@router.post("/{article_id}/duplicate", response_model=ResponseModel)
+def duplicate_article(
+    article_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """复制文章 (管理员)"""
+    source = db.query(Article).filter(Article.id == article_id).first()
+    if not source:
+        return ResponseModel(code=404, msg="文章不存在")
+
+    duplicate = Article(
+        title=f"{source.title}（副本）",
+        summary=source.summary,
+        content=source.content,
+        cover=source.cover,
+        category_id=source.category_id,
+        author_id=current_user.id,
+        is_published=False,
+        is_top=False,
+        is_recommend=False,
+        is_hidden=False,
+        is_protected=bool(source.is_protected),
+        protection_question=source.protection_question,
+        protection_answer=source.protection_answer,
+    )
+    duplicate.tags = list(source.tags or [])
+    db.add(duplicate)
+    db.commit()
+    db.refresh(duplicate)
+
+    record_admin_action(
+        user=current_user,
+        action="article.duplicate",
+        target_type="article",
+        target_id=str(duplicate.id),
+        description=f"复制文章: {source.title} -> {duplicate.title}",
+        request=request,
+        extra={"source_id": source.id},
+    )
+    return ResponseModel(code=200, msg="复制成功", data={"id": duplicate.id})
+
+
+@router.post("/admin/batch", response_model=ResponseModel)
+def batch_operate_articles(
+    payload: ArticleBatchAction,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """批量操作文章 (管理员)"""
+    action = (payload.action or "").strip().lower()
+    if not payload.ids:
+        return ResponseModel(code=400, msg="请选择文章")
+    if action not in {"publish", "unpublish", "recycle", "restore", "delete"}:
+        return ResponseModel(code=400, msg="不支持的批量动作")
+
+    articles = db.query(Article).filter(Article.id.in_(payload.ids)).all()
+    if not articles:
+        return ResponseModel(code=404, msg="文章不存在")
+
+    affected = 0
+    for item in articles:
+        if action == "publish":
+            item.is_published = True
+            item.is_hidden = False
+        elif action == "unpublish":
+            item.is_published = False
+            item.is_hidden = False
+        elif action == "recycle":
+            item.is_hidden = True
+            item.is_published = False
+        elif action == "restore":
+            item.is_hidden = False
+        elif action == "delete":
+            db.delete(item)
+        affected += 1
+
+    db.commit()
+
+    for aid in payload.ids:
+        redis_client.delete(f"article:{aid}")
+        redis_client.delete(f"article:{aid}:views")
+
+    record_admin_action(
+        user=current_user,
+        action="article.batch",
+        target_type="article",
+        target_id=",".join(str(i) for i in payload.ids[:20]),
+        description=f"批量操作文章: {action}, 共{affected}篇",
+        request=request,
+        extra={"action": action, "count": affected, "ids": payload.ids},
+    )
+    return ResponseModel(code=200, msg=f"批量操作成功，共 {affected} 篇")
 
 
 @router.get("", response_model=ResponseModel[PagedData[ArticleListItem]])
