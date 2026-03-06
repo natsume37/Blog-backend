@@ -25,44 +25,44 @@ router = APIRouter(prefix="/monitor", tags=["监控"])
 SERVER_START_TIME = time.time()
 
 _EN_REGION_TO_CN = {
-    "beijing": "北京",
-    "tianjin": "天津",
-    "shanghai": "上海",
-    "chongqing": "重庆",
-    "hebei": "河北",
-    "shanxi": "山西",
-    "liaoning": "辽宁",
-    "jilin": "吉林",
-    "heilongjiang": "黑龙江",
-    "jiangsu": "江苏",
-    "zhejiang": "浙江",
-    "anhui": "安徽",
-    "fujian": "福建",
-    "jiangxi": "江西",
-    "shandong": "山东",
-    "henan": "河南",
-    "hubei": "湖北",
-    "hunan": "湖南",
-    "guangdong": "广东",
-    "hainan": "海南",
-    "sichuan": "四川",
-    "guizhou": "贵州",
-    "yunnan": "云南",
-    "shaanxi": "陕西",
-    "shanxi sheng": "陕西",
-    "gansu": "甘肃",
-    "qinghai": "青海",
-    "taiwan": "台湾",
-    "inner mongolia": "内蒙古",
-    "guangxi": "广西",
-    "tibet": "西藏",
-    "ningxia": "宁夏",
-    "xinjiang": "新疆",
-    "hong kong": "香港",
-    "macao": "澳门",
-    "macau": "澳门",
+    "beijing": "北京市",
+    "tianjin": "天津市",
+    "shanghai": "上海市",
+    "chongqing": "重庆市",
+    "hebei": "河北省",
+    "shanxi": "山西省",
+    "liaoning": "辽宁省",
+    "jilin": "吉林省",
+    "heilongjiang": "黑龙江省",
+    "jiangsu": "江苏省",
+    "zhejiang": "浙江省",
+    "anhui": "安徽省",
+    "fujian": "福建省",
+    "jiangxi": "江西省",
+    "shandong": "山东省",
+    "henan": "河南省",
+    "hubei": "湖北省",
+    "hunan": "湖南省",
+    "guangdong": "广东省",
+    "hainan": "海南省",
+    "sichuan": "四川省",
+    "guizhou": "贵州省",
+    "yunnan": "云南省",
+    "shaanxi": "陕西省",
+    "shanxi sheng": "陕西省",
+    "gansu": "甘肃省",
+    "qinghai": "青海省",
+    "taiwan": "台湾省",
+    "inner mongolia": "内蒙古自治区",
+    "guangxi": "广西壮族自治区",
+    "tibet": "西藏自治区",
+    "ningxia": "宁夏回族自治区",
+    "xinjiang": "新疆维吾尔自治区",
+    "hong kong": "香港特别行政区",
+    "macao": "澳门特别行政区",
+    "macau": "澳门特别行政区",
     # 城市兜底，解决“Wuhan 有数据但湖北为 0”
-    "wuhan": "湖北",
+    "wuhan": "湖北省",
 }
 
 
@@ -78,7 +78,26 @@ def _to_map_province_name(province: str, city: str) -> str:
     if lowered in _EN_REGION_TO_CN:
         return _EN_REGION_TO_CN[lowered]
 
-    return raw.replace("省", "").replace("市", "").replace("自治区", "").replace("壮族", "").replace("回族", "").replace("维吾尔", "")
+    if raw.endswith(("省", "市", "自治区", "特别行政区")):
+        return raw
+
+    # 中文无后缀时补齐，确保与 china.json 名称一致
+    direct = {
+        "北京": "北京市",
+        "天津": "天津市",
+        "上海": "上海市",
+        "重庆": "重庆市",
+        "内蒙古": "内蒙古自治区",
+        "广西": "广西壮族自治区",
+        "西藏": "西藏自治区",
+        "宁夏": "宁夏回族自治区",
+        "新疆": "新疆维吾尔自治区",
+        "香港": "香港特别行政区",
+        "澳门": "澳门特别行政区",
+    }
+    if raw in direct:
+        return direct[raw]
+    return f"{raw}省"
 
 
 @router.get("/visits", response_model=ResponseModel[PagedData])
