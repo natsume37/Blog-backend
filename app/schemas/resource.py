@@ -24,3 +24,12 @@ class ResourceResponse(ResourceBase):
 class ResourceList(BaseModel):
     total: int
     items: list[ResourceResponse]
+
+
+class ResourceBatchDelete(BaseModel):
+    ids: list[int]
+
+
+class ResourceSyncRequest(BaseModel):
+    prefix: str = ""
+    limit: int = 1000
