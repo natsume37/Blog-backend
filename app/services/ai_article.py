@@ -8,6 +8,23 @@ from app.core.config import Settings
 from app.schemas.ai import AIDraftRequest, AISummaryRequest
 
 
+def _supports_json_output(settings: Settings) -> bool:
+    provider = (settings.AI_PROVIDER or "").lower()
+    base_url = (settings.AI_BASE_URL or "").lower()
+    return (
+        "deepseek" in provider
+        or "openai" in provider
+        or "deepseek" in base_url
+        or "openai" in base_url
+    )
+
+
+def _attach_json_output(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    if _supports_json_output(settings):
+        payload["response_format"] = {"type": "json_object"}
+    return payload
+
+
 def _content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -130,6 +147,7 @@ def generate_article_draft(data: AIDraftRequest, settings: Settings) -> dict[str
 
     payload = _build_payload(data)
     payload["model"] = settings.AI_MODEL
+    payload = _attach_json_output(payload, settings)
     body = json.dumps(payload).encode("utf-8")
     endpoint = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
     req = urllib_request.Request(
@@ -213,6 +231,7 @@ def generate_article_summary(data: AISummaryRequest, settings: Settings) -> dict
         ],
         "temperature": 0.3,
     }
+    payload = _attach_json_output(payload, settings)
     body = json.dumps(payload).encode("utf-8")
     endpoint = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
     req = urllib_request.Request(
