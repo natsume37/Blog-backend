@@ -14,7 +14,6 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_admin
-from app.core.geo import normalize_china_province_name
 from app.models.user import User
 from app.models.monitor import VisitLog
 from app.schemas.common import ResponseModel, PagedData
@@ -24,6 +23,62 @@ router = APIRouter(prefix="/monitor", tags=["监控"])
 
 # 服务启动时间
 SERVER_START_TIME = time.time()
+
+_EN_REGION_TO_CN = {
+    "beijing": "北京",
+    "tianjin": "天津",
+    "shanghai": "上海",
+    "chongqing": "重庆",
+    "hebei": "河北",
+    "shanxi": "山西",
+    "liaoning": "辽宁",
+    "jilin": "吉林",
+    "heilongjiang": "黑龙江",
+    "jiangsu": "江苏",
+    "zhejiang": "浙江",
+    "anhui": "安徽",
+    "fujian": "福建",
+    "jiangxi": "江西",
+    "shandong": "山东",
+    "henan": "河南",
+    "hubei": "湖北",
+    "hunan": "湖南",
+    "guangdong": "广东",
+    "hainan": "海南",
+    "sichuan": "四川",
+    "guizhou": "贵州",
+    "yunnan": "云南",
+    "shaanxi": "陕西",
+    "shanxi sheng": "陕西",
+    "gansu": "甘肃",
+    "qinghai": "青海",
+    "taiwan": "台湾",
+    "inner mongolia": "内蒙古",
+    "guangxi": "广西",
+    "tibet": "西藏",
+    "ningxia": "宁夏",
+    "xinjiang": "新疆",
+    "hong kong": "香港",
+    "macao": "澳门",
+    "macau": "澳门",
+    # 城市兜底，解决“Wuhan 有数据但湖北为 0”
+    "wuhan": "湖北",
+}
+
+
+def _to_map_province_name(province: str, city: str) -> str:
+    raw = (province or "").strip()
+    if not raw:
+        raw = (city or "").strip()
+    if not raw:
+        return ""
+
+    lowered = raw.lower().replace("_", " ").replace("-", " ").replace(" province", "").strip()
+    lowered = " ".join(lowered.split())
+    if lowered in _EN_REGION_TO_CN:
+        return _EN_REGION_TO_CN[lowered]
+
+    return raw.replace("省", "").replace("市", "").replace("自治区", "").replace("壮族", "").replace("回族", "").replace("维吾尔", "")
 
 
 @router.get("/visits", response_model=ResponseModel[PagedData])
@@ -71,24 +126,26 @@ def get_map_stats(
     current_user: User = Depends(get_current_admin)
 ):
     """获取地图统计数据（按省份分组）"""
-    # Group by province
+    # Group by province + city, then fold to map province name
     stats = db.query(
-        VisitLog.province, 
+        VisitLog.province,
+        VisitLog.city,
         func.count(VisitLog.id).label('count')
     ).filter(
-        VisitLog.province != ""
+        (VisitLog.province != "") | (VisitLog.city != "")
     ).group_by(
-        VisitLog.province
+        VisitLog.province,
+        VisitLog.city
     ).all()
-    
-    result = []
-    for province, count in stats:
-        normalized = normalize_china_province_name(province or "")
-        # Clean province name (remove '省', '市' suffix for ECharts map matching)
-        name = normalized.replace("省", "").replace("市", "").replace("自治区", "").replace("壮族", "").replace("回族", "").replace("维吾尔", "")
-        if name:
-            result.append({"name": name, "value": count})
-            
+
+    merged: dict[str, int] = {}
+    for province, city, count in stats:
+        name = _to_map_province_name(province or "", city or "")
+        if not name:
+            continue
+        merged[name] = merged.get(name, 0) + int(count or 0)
+
+    result = [{"name": k, "value": v} for k, v in merged.items()]
     return ResponseModel(code=200, data=result)
 
 

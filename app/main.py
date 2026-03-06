@@ -12,7 +12,6 @@ from urllib.error import URLError, HTTPError
 from contextlib import asynccontextmanager
 from starlette.background import BackgroundTask, BackgroundTasks
 from app.core.database import SessionLocal
-from app.core.geo import normalize_china_province_name
 from app.models.monitor import VisitLog
 
 from app.core.config import settings
@@ -63,9 +62,6 @@ def _resolve_public_ip_location(ip: str) -> tuple[str, str]:
             or payload.get("region_name")
             or ""
         ).strip()
-        country_code = str(payload.get("country_code") or "").upper()
-        if country_code == "CN":
-            province = normalize_china_province_name(province)
         city = str(payload.get("city") or payload.get("city_name") or "").strip()
         return province, city
 
