@@ -9,5 +9,6 @@ from app.models.changelog import Changelog
 from app.models.resource import Resource
 from app.models.audit_log import AuditLog
 from app.models.login_log import LoginLog
+from app.models.article_version import ArticleVersion
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog"]
+__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion"]

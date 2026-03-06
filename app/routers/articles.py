@@ -1,6 +1,7 @@
 from typing import Optional, List
 import logging
 import re
+import json
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -9,11 +10,13 @@ from app.core.database import get_db
 from app.core.deps import get_current_admin, get_current_user_optional
 from app.core.cache import redis_client
 from app.models.article import Article, Category, Tag, article_tags, ArticleLike
+from app.models.article_version import ArticleVersion
 from app.models.user import User
 from app.schemas.article import (
     ArticleListItem, ArticleDetail, CategoryResponse, TagResponse,
     ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles, ArticleBatchAction
 )
+from app.schemas.article_version import ArticleVersionItem
 from app.schemas.common import ResponseModel, PagedData
 from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
 from app.core.config import get_settings, Settings
@@ -41,6 +44,31 @@ def _normalize_slug(value: Optional[str]) -> Optional[str]:
     slug = re.sub(r"[^a-z0-9-]+", "-", slug)
     slug = re.sub(r"-{2,}", "-", slug).strip("-")
     return slug or None
+
+
+def _create_article_version_snapshot(db: Session, article: Article, operator_id: Optional[int]) -> None:
+    tag_ids = [tag.id for tag in (article.tags or [])]
+    db.add(ArticleVersion(
+        article_id=article.id,
+        title=article.title or "",
+        slug=article.slug,
+        summary=article.summary or "",
+        content=article.content or "",
+        cover=article.cover or "",
+        seo_title=article.seo_title or "",
+        seo_description=article.seo_description or "",
+        seo_keywords=article.seo_keywords or "",
+        category_id=article.category_id,
+        tag_ids=json.dumps(tag_ids, ensure_ascii=False),
+        is_published=1 if article.is_published else 0,
+        is_top=1 if article.is_top else 0,
+        is_recommend=1 if article.is_recommend else 0,
+        is_hidden=1 if article.is_hidden else 0,
+        visibility=_normalize_visibility(article.visibility),
+        is_protected=1 if article.is_protected else 0,
+        protection_question=article.protection_question or "",
+        created_by=operator_id,
+    ))
 
 
 @router.get("/admin/list", response_model=ResponseModel[PagedData[ArticleAdminListItem]])
@@ -196,6 +224,8 @@ def update_article(
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         return ResponseModel(code=404, msg="文章不存在")
+
+    _create_article_version_snapshot(db, article, current_user.id)
         
     if article_in.title is not None:
         article.title = article_in.title
@@ -273,6 +303,79 @@ def update_article(
     )
     
     return ResponseModel(code=200, msg="更新成功")
+
+
+@router.get("/{article_id}/versions", response_model=ResponseModel[List[ArticleVersionItem]])
+def get_article_versions(
+    article_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    rows = db.query(ArticleVersion).filter(ArticleVersion.article_id == article_id).order_by(
+        ArticleVersion.created_at.desc(), ArticleVersion.id.desc()
+    ).limit(50).all()
+    return ResponseModel(code=200, data=[ArticleVersionItem.model_validate(item) for item in rows])
+
+
+@router.post("/{article_id}/versions/{version_id}/restore", response_model=ResponseModel)
+def restore_article_version(
+    article_id: int,
+    version_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    article = db.query(Article).filter(Article.id == article_id).first()
+    if not article:
+        return ResponseModel(code=404, msg="文章不存在")
+    version = db.query(ArticleVersion).filter(
+        ArticleVersion.id == version_id,
+        ArticleVersion.article_id == article_id
+    ).first()
+    if not version:
+        return ResponseModel(code=404, msg="版本不存在")
+
+    _create_article_version_snapshot(db, article, current_user.id)
+
+    article.title = version.title
+    article.slug = _normalize_slug(version.slug)
+    article.summary = version.summary
+    article.content = version.content
+    article.cover = version.cover
+    article.seo_title = version.seo_title or ""
+    article.seo_description = version.seo_description or ""
+    article.seo_keywords = version.seo_keywords or ""
+    article.category_id = version.category_id
+    article.is_published = bool(version.is_published)
+    article.is_top = bool(version.is_top)
+    article.is_recommend = bool(version.is_recommend)
+    article.is_hidden = bool(version.is_hidden)
+    article.visibility = _normalize_visibility(version.visibility)
+    article.is_protected = bool(version.is_protected)
+    article.protection_question = version.protection_question or ""
+
+    try:
+        tag_ids = json.loads(version.tag_ids or "[]")
+    except Exception:
+        tag_ids = []
+    if not isinstance(tag_ids, list):
+        tag_ids = []
+    tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all() if tag_ids else []
+    article.tags = tags
+
+    db.commit()
+    redis_client.delete(f"article:{article_id}")
+    redis_client.delete(f"article:{article_id}:views")
+
+    record_admin_action(
+        user=current_user,
+        action="article.version.restore",
+        target_type="article",
+        target_id=str(article_id),
+        description=f"回滚文章到历史版本: v{version_id}",
+        request=request,
+    )
+    return ResponseModel(code=200, msg="版本已回滚")
 
 
 @router.delete("/{article_id}", response_model=ResponseModel)
