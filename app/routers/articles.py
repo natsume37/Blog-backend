@@ -24,6 +24,13 @@ router = APIRouter(prefix="/articles", tags=["文章"])
 logger = logging.getLogger(__name__)
 
 
+def _normalize_visibility(value: Optional[str]) -> str:
+    v = (value or "public").strip().lower()
+    if v not in {"public", "login", "private"}:
+        return "public"
+    return v
+
+
 @router.get("/admin/list", response_model=ResponseModel[PagedData[ArticleAdminListItem]])
 def get_admin_articles(
     current: int = Query(1, ge=1),
@@ -78,7 +85,8 @@ def get_admin_articles(
             is_top=article.is_top,
             is_recommend=article.is_recommend,
             is_protected=bool(article.is_protected or False),
-            is_hidden=bool(article.is_hidden or False)
+            is_hidden=bool(article.is_hidden or False),
+            visibility=_normalize_visibility(article.visibility),
         ))
         
     return ResponseModel(
@@ -126,6 +134,7 @@ def create_article(
         is_top=article_in.is_top,
         is_recommend=article_in.is_recommend,
         is_hidden=article_in.is_hidden,
+        visibility=_normalize_visibility(article_in.visibility),
         is_protected=article_in.is_protected,
         protection_question=article_in.protection_question,
         protection_answer=hash_protection_answer(article_in.protection_answer) if article_in.protection_answer else None
@@ -193,6 +202,8 @@ def update_article(
     
     if article_in.is_hidden is not None:
         article.is_hidden = article_in.is_hidden
+    if article_in.visibility is not None:
+        article.visibility = _normalize_visibility(article_in.visibility)
         
     if article_in.is_protected is not None:
         article.is_protected = article_in.is_protected
@@ -280,6 +291,7 @@ def duplicate_article(
         is_top=False,
         is_recommend=False,
         is_hidden=False,
+        visibility=_normalize_visibility(source.visibility),
         is_protected=bool(source.is_protected),
         protection_question=source.protection_question,
         protection_answer=source.protection_answer,
@@ -368,7 +380,8 @@ def get_articles(
     """获取文章列表"""
     query = db.query(Article).filter(
         Article.is_published == True,
-        or_(Article.is_hidden == False, Article.is_hidden == None)
+        or_(Article.is_hidden == False, Article.is_hidden == None),
+        or_(Article.visibility == "public", Article.visibility == None),
     )
     
     # Filter by category
@@ -466,6 +479,14 @@ def get_article(
             if not (current_user and current_user.is_admin):
                 logger.warning(f"Article {article_id} not published and user is not admin")
                 return ResponseModel(code=404, msg="文章不存在")
+
+        visibility = _normalize_visibility(article.visibility)
+        if visibility == "private":
+            if not (current_user and current_user.is_admin):
+                return ResponseModel(code=403, msg="文章为私密可见")
+        elif visibility == "login":
+            if not current_user:
+                return ResponseModel(code=401, msg="请先登录后查看文章")
             
         # 增加阅读数 (简单实现，直接写库或 Redis)
         # 这里为了简便，沿用之前的 Redis 逻辑或直接 +1
@@ -541,6 +562,9 @@ def get_article(
                 is_top=article.is_top,
                 is_recommend=article.is_recommend,
                 is_hidden=bool(article.is_hidden or False),
+                is_published=bool(article.is_published or False),
+                category_id=article.category_id,
+                visibility=visibility,
                 is_protected=bool(article.is_protected or False),
                 protection_question=article.protection_question if article.is_protected else None
             )
@@ -683,7 +707,8 @@ def get_home_categorized_articles(db: Session = Depends(get_db)):
         # Get top 6 articles for each category
         articles = db.query(Article).filter(
             Article.category_id == category.id,
-            Article.is_published == True
+            Article.is_published == True,
+            or_(Article.visibility == "public", Article.visibility == None),
         ).order_by(Article.created_at.desc()).limit(6).all()
         
         if not articles:

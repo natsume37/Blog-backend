@@ -57,6 +57,7 @@ class ArticleBase(BaseModel):
     is_top: Optional[bool] = False
     is_recommend: Optional[bool] = False
     is_hidden: Optional[bool] = False
+    visibility: Optional[str] = "public"
     
     # 权限控制
     is_protected: bool = False
@@ -79,6 +80,7 @@ class ArticleUpdate(BaseModel):
     is_top: Optional[bool] = None
     is_recommend: Optional[bool] = None
     is_hidden: Optional[bool] = None
+    visibility: Optional[str] = None
     
     # 权限控制
     is_protected: Optional[bool] = None
@@ -121,6 +123,7 @@ class ArticleAdminListItem(BaseModel):
     is_recommend: bool
     is_hidden: bool = False
     is_protected: bool = False
+    visibility: str = "public"
 
     class Config:
         from_attributes = True
@@ -143,6 +146,9 @@ class ArticleDetail(BaseModel):
     is_top: bool = False
     is_recommend: bool = False
     is_hidden: bool = False
+    is_published: bool = True
+    category_id: Optional[int] = None
+    visibility: str = "public"
     is_protected: Optional[bool] = False
     protection_question: Optional[str] = None
 

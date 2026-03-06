@@ -89,6 +89,7 @@ class Article(Base):
     is_top = Column(Boolean, default=False)
     is_recommend = Column(Boolean, default=False)
     is_hidden = Column(Boolean, default=False, comment="是否隐藏(不显示在列表，但可通过链接访问)")
+    visibility = Column(String(20), default="public", nullable=False, comment="可见性: public/login/private")
     
     # 权限控制
     is_protected = Column(Boolean, default=False, comment="是否受保护")
