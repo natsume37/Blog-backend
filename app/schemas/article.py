@@ -49,9 +49,13 @@ class TagResponse(TagBase):
 
 class ArticleBase(BaseModel):
     title: str
+    slug: Optional[str] = None
     summary: Optional[str] = ""
     content: str
     cover: Optional[str] = ""
+    seo_title: Optional[str] = ""
+    seo_description: Optional[str] = ""
+    seo_keywords: Optional[str] = ""
     category_id: Optional[int] = None
     is_published: Optional[bool] = True
     is_top: Optional[bool] = False
@@ -71,9 +75,13 @@ class ArticleCreate(ArticleBase):
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = None
+    slug: Optional[str] = None
     summary: Optional[str] = None
     content: Optional[str] = None
     cover: Optional[str] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    seo_keywords: Optional[str] = None
     category_id: Optional[int] = None
     tag_ids: Optional[List[int]] = None
     is_published: Optional[bool] = None
@@ -132,9 +140,13 @@ class ArticleAdminListItem(BaseModel):
 class ArticleDetail(BaseModel):
     id: int
     title: str
+    slug: Optional[str] = None
     summary: Optional[str] = ""
     content: str
     cover: Optional[str] = ""
+    seo_title: Optional[str] = ""
+    seo_description: Optional[str] = ""
+    seo_keywords: Optional[str] = ""
     createTime: str
     createdAt: Optional[datetime] = None
     categoryName: Optional[str] = ""

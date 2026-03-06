@@ -1,5 +1,6 @@
 from typing import Optional, List
 import logging
+import re
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -29,6 +30,17 @@ def _normalize_visibility(value: Optional[str]) -> str:
     if v not in {"public", "login", "private"}:
         return "public"
     return v
+
+
+def _normalize_slug(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    slug = value.strip().lower()
+    if not slug:
+        return None
+    slug = re.sub(r"[^a-z0-9-]+", "-", slug)
+    slug = re.sub(r"-{2,}", "-", slug).strip("-")
+    return slug or None
 
 
 @router.get("/admin/list", response_model=ResponseModel[PagedData[ArticleAdminListItem]])
@@ -114,6 +126,12 @@ def create_article(
         category = db.query(Category).filter(Category.id == article_in.category_id).first()
         if not category:
             return ResponseModel(code=404, msg="分类不存在")
+
+    normalized_slug = _normalize_slug(article_in.slug)
+    if normalized_slug:
+        exists_slug = db.query(Article).filter(Article.slug == normalized_slug).first()
+        if exists_slug:
+            return ResponseModel(code=400, msg="Slug 已存在，请更换")
     
     # 剥离七牛云签名的逻辑
     content = article_in.content
@@ -125,9 +143,13 @@ def create_article(
             
     article = Article(
         title=article_in.title,
+        slug=normalized_slug,
         summary=article_in.summary,
         content=content,
         cover=cover,
+        seo_title=article_in.seo_title or "",
+        seo_description=article_in.seo_description or "",
+        seo_keywords=article_in.seo_keywords or "",
         category_id=article_in.category_id,
         author_id=current_user.id,
         is_published=article_in.is_published,
@@ -177,6 +199,16 @@ def update_article(
         
     if article_in.title is not None:
         article.title = article_in.title
+    if article_in.slug is not None:
+        normalized_slug = _normalize_slug(article_in.slug)
+        if normalized_slug:
+            exists_slug = db.query(Article).filter(
+                Article.slug == normalized_slug,
+                Article.id != article_id
+            ).first()
+            if exists_slug:
+                return ResponseModel(code=400, msg="Slug 已存在，请更换")
+        article.slug = normalized_slug
     if article_in.summary is not None:
         article.summary = article_in.summary
     if article_in.content is not None:
@@ -191,6 +223,12 @@ def update_article(
         if settings.is_qiniu_timestamp_enabled and cover:
             cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
         article.cover = cover
+    if article_in.seo_title is not None:
+        article.seo_title = article_in.seo_title
+    if article_in.seo_description is not None:
+        article.seo_description = article_in.seo_description
+    if article_in.seo_keywords is not None:
+        article.seo_keywords = article_in.seo_keywords
     if article_in.category_id is not None:
         article.category_id = article_in.category_id
     if article_in.is_published is not None:
@@ -282,9 +320,13 @@ def duplicate_article(
 
     duplicate = Article(
         title=f"{source.title}（副本）",
+        slug=None,
         summary=source.summary,
         content=source.content,
         cover=source.cover,
+        seo_title=source.seo_title,
+        seo_description=source.seo_description,
+        seo_keywords=source.seo_keywords,
         category_id=source.category_id,
         author_id=current_user.id,
         is_published=False,
@@ -548,9 +590,13 @@ def get_article(
             data=ArticleDetail(
                 id=article.id,
                 title=article.title,
+                slug=article.slug,
                 summary=article.summary or "",
                 cover=cover,
                 content=content,
+                seo_title=article.seo_title or "",
+                seo_description=article.seo_description or "",
+                seo_keywords=article.seo_keywords or "",
                 createTime=article.created_at.strftime("%Y-%m-%d"),
                 createdAt=article.created_at,
                 categoryName=article.category.name if article.category else "",

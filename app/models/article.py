@@ -71,9 +71,13 @@ class Article(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     title = Column(String(200), nullable=False)
+    slug = Column(String(255), nullable=True, unique=True, index=True, comment="自定义URL slug")
     summary = Column(String(500), default="")
     content = Column(Text, nullable=False)
     cover = Column(String(500), default="")
+    seo_title = Column(String(255), default="", comment="SEO标题")
+    seo_description = Column(String(500), default="", comment="SEO描述")
+    seo_keywords = Column(String(500), default="", comment="SEO关键词，逗号分隔")
     
     # Foreign keys
     author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
