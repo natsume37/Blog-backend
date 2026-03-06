@@ -4,7 +4,7 @@ import time
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -22,6 +22,7 @@ from app.schemas.ai import (
 )
 from app.schemas.common import ResponseModel
 from app.services.ai_article import generate_article_draft, generate_article_summary
+from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -180,7 +181,8 @@ def get_ai_config(
 @router.put("/config", response_model=ResponseModel[AIConfig])
 def update_ai_config(
     payload: AIConfig,
-    _: User = Depends(get_current_admin),
+    request: Request,
+    current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -195,13 +197,23 @@ def update_ai_config(
         ai_model=runtime.AI_MODEL,
         ai_timeout_seconds=runtime.AI_TIMEOUT_SECONDS,
     )
+    record_admin_action(
+        user=current_user,
+        action="ai.config.update",
+        target_type="ai_config",
+        target_id="global",
+        description="更新 AI 配置",
+        request=request,
+        extra={"provider": data.ai_provider, "model": data.ai_model, "enabled": data.ai_enabled},
+    )
     return ResponseModel(code=200, msg="AI 配置已更新", data=data)
 
 
 @router.post("/test", response_model=ResponseModel[AIConfigTestResult])
 def test_ai_config(
+    request: Request,
     payload: AIConfig | None = None,
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -217,10 +229,28 @@ def test_ai_config(
                 "AI_TIMEOUT_SECONDS": max(1, int(payload.ai_timeout_seconds)),
             })
         result = _test_ai_endpoint(runtime)
+        record_admin_action(
+            user=current_user,
+            action="ai.config.test",
+            target_type="ai_config",
+            target_id="global",
+            description=f"AI 连通性测试{'成功' if result.ok else '失败'}",
+            request=request,
+            extra={"provider": result.provider, "model": result.model, "latency_ms": result.latency_ms, "ok": result.ok},
+        )
         return ResponseModel(code=200 if result.ok else 400, msg=result.message, data=result)
     except Exception as exc:
         msg = _friendly_ai_error(exc)
         logger.error("Test AI config failed: %s", exc, exc_info=True)
+        record_admin_action(
+            user=current_user,
+            action="ai.config.test",
+            target_type="ai_config",
+            target_id="global",
+            description="AI 连通性测试失败",
+            request=request,
+            extra={"error": str(exc)},
+        )
         return ResponseModel(
             code=500,
             msg=msg,

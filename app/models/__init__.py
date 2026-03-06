@@ -7,6 +7,6 @@ from app.models.comment import Comment
 from app.models.monitor import VisitLog
 from app.models.changelog import Changelog
 from app.models.resource import Resource
+from app.models.audit_log import AuditLog
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource"]
-
+__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog"]

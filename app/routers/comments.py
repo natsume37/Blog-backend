@@ -16,6 +16,7 @@ from app.schemas.comment import (
     CommentReply, CommentUser, CommentAdminItem
 )
 from app.schemas.common import ResponseModel, PagedData
+from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/comments", tags=["评论"])
@@ -364,6 +365,7 @@ def like_comment(
 def update_comment_admin(
     comment_id: int,
     comment_in: CommentUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -378,6 +380,16 @@ def update_comment_admin(
         comment.is_approved = comment_in.is_approved
     
     db.commit()
+
+    record_admin_action(
+        user=current_user,
+        action="comment.update",
+        target_type="comment",
+        target_id=str(comment.id),
+        description=f"更新评论状态: {comment.id}",
+        request=request,
+        extra={"is_approved": comment.is_approved},
+    )
     
     return ResponseModel(code=200, msg="更新成功")
 
@@ -385,6 +397,7 @@ def update_comment_admin(
 @router.delete("/admin/{comment_id}", response_model=ResponseModel)
 def delete_comment_admin(
     comment_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -400,6 +413,7 @@ def delete_comment_admin(
     
     # 计算要删除的评论数
     child_count = db.query(Comment).filter(Comment.parent_id == comment_id).count()
+    comment_content = (comment.content or "")[:80]
     
     db.delete(comment)
     
@@ -407,5 +421,14 @@ def delete_comment_admin(
         article.comment_count = max(0, article.comment_count - 1 - child_count)
     
     db.commit()
+
+    record_admin_action(
+        user=current_user,
+        action="comment.delete",
+        target_type="comment",
+        target_id=str(comment_id),
+        description=f"删除评论: {comment_content}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="删除成功")

@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
 from email.utils import formataddr
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -18,6 +18,7 @@ from app.models.site import SiteInfo
 from app.models.user import User
 from app.schemas.site import SiteStats, SiteConfig, MailConfig, MailTestPayload
 from app.schemas.common import ResponseModel
+from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/site", tags=["站点"])
@@ -118,6 +119,7 @@ def get_site_config(db: Session = Depends(get_db)):
 @router.put("/config", response_model=ResponseModel[SiteConfig])
 def update_site_config(
     config: SiteConfig,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -149,6 +151,15 @@ def update_site_config(
     
     # Invalidate cache
     redis_client.delete("site_config")
+
+    record_admin_action(
+        user=current_user,
+        action="site.config.update",
+        target_type="site_config",
+        target_id="global",
+        description="更新站点配置",
+        request=request,
+    )
     
     return ResponseModel(code=200, data=config, msg="配置已更新")
 
@@ -172,6 +183,7 @@ def get_mail_config(
 @router.put("/mail-config", response_model=ResponseModel[MailConfig])
 def update_mail_config(
     payload: MailConfig,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -182,12 +194,21 @@ def update_mail_config(
     _set_site_val(db, "mail_from_email", payload.emailsFromEmail.strip())
     _set_site_val(db, "mail_from_name", payload.emailsFromName.strip())
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="mail.config.update",
+        target_type="mail_config",
+        target_id="global",
+        description="更新邮件配置",
+        request=request,
+    )
     return ResponseModel(code=200, msg="邮件配置已保存", data=payload)
 
 
 @router.post("/mail-config/test", response_model=ResponseModel)
 def test_mail_config(
     payload: MailTestPayload,
+    request: Request,
     current_user: User = Depends(get_current_admin)
 ):
     try:
@@ -211,6 +232,23 @@ def test_mail_config(
         server.login(payload.smtpUser, payload.smtpPassword)
         server.sendmail(payload.emailsFromEmail, [payload.emailTo], msg.as_string())
         server.quit()
+        record_admin_action(
+            user=current_user,
+            action="mail.config.test",
+            target_type="mail_config",
+            target_id=payload.emailTo,
+            description=f"测试邮件发送成功: {payload.emailTo}",
+            request=request,
+        )
         return ResponseModel(code=200, msg=f"测试邮件已发送到 {payload.emailTo}")
     except Exception as e:
+        record_admin_action(
+            user=current_user,
+            action="mail.config.test",
+            target_type="mail_config",
+            target_id=payload.emailTo,
+            description=f"测试邮件发送失败: {payload.emailTo}",
+            request=request,
+            extra={"error": str(e)},
+        )
         return ResponseModel(code=500, msg=f"测试失败: {e}")

@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, Body
+from fastapi import APIRouter, Depends, Query, HTTPException, Body, Request
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user_optional, get_current_admin
@@ -10,6 +10,7 @@ from app.schemas.common import ResponseModel, PagedData
 from app.core.cache import RedisClient
 from app.core.config import get_settings, Settings
 from qiniu import Auth, BucketManager
+from app.utils.audit import record_admin_action
 
 router = APIRouter(prefix="/resources", tags=["资源管理"])
 
@@ -98,6 +99,7 @@ def get_resources(
 @router.delete("/{id}", response_model=ResponseModel)
 def delete_resource(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings),
@@ -124,11 +126,21 @@ def delete_resource(
         # 可选：如果硬性要求一致性，这里可以抛出异常
 
     # 2. 删除数据库记录
+    target_key = resource.key
     db.delete(resource)
     db.commit()
     
     # 3. 清除相关缓存（版本号法）
     redis_client = RedisClient()
     redis_client.get_client().incr("resources:list:version")
+
+    record_admin_action(
+        user=current_user,
+        action="resource.delete",
+        target_type="resource",
+        target_id=str(id),
+        description=f"删除资源: {target_key}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="删除成功")

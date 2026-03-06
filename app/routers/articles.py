@@ -17,6 +17,7 @@ from app.schemas.common import ResponseModel, PagedData
 from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
 from app.core.config import get_settings, Settings
 from app.core.security import hash_protection_answer, verify_protection_answer
+from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/articles", tags=["文章"])
@@ -94,6 +95,7 @@ def get_admin_articles(
 @router.post("", response_model=ResponseModel)
 def create_article(
     article_in: ArticleCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings)
@@ -137,6 +139,15 @@ def create_article(
     db.add(article)
     db.commit()
     db.refresh(article)
+
+    record_admin_action(
+        user=current_user,
+        action="article.create",
+        target_type="article",
+        target_id=str(article.id),
+        description=f"创建文章: {article.title}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="创建成功", data={"id": article.id})
 
@@ -145,6 +156,7 @@ def create_article(
 def update_article(
     article_id: int,
     article_in: ArticleUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings)
@@ -201,6 +213,15 @@ def update_article(
     
     # Invalidate cache
     redis_client.delete(f"article:{article_id}")
+
+    record_admin_action(
+        user=current_user,
+        action="article.update",
+        target_type="article",
+        target_id=str(article_id),
+        description=f"更新文章: {article.title}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="更新成功")
 
@@ -208,6 +229,7 @@ def update_article(
 @router.delete("/{article_id}", response_model=ResponseModel)
 def delete_article(
     article_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -222,6 +244,15 @@ def delete_article(
     # Invalidate cache
     redis_client.delete(f"article:{article_id}")
     redis_client.delete(f"article:{article_id}:views")
+
+    record_admin_action(
+        user=current_user,
+        action="article.delete",
+        target_type="article",
+        target_id=str(article_id),
+        description=f"删除文章: {article.title}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="删除成功")
 

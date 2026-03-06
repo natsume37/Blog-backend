@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,6 +8,7 @@ from app.core.security import get_password_hash
 from app.models.user import User
 from app.schemas.user import UserInfo, UserAdminUpdate, UserAdminCreate
 from app.schemas.common import ResponseModel, PagedData
+from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
@@ -62,6 +63,7 @@ def get_users(
 @router.post("/admin", response_model=ResponseModel)
 def create_user(
     user_data: UserAdminCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -86,6 +88,15 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    record_admin_action(
+        user=current_user,
+        action="user.create",
+        target_type="user",
+        target_id=str(user.id),
+        description=f"创建用户: {user.username}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="创建成功", data={"id": user.id})
 
@@ -94,6 +105,7 @@ def create_user(
 def update_user(
     user_id: int,
     user_data: UserAdminUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -131,12 +143,21 @@ def update_user(
         user.hashed_password = get_password_hash(user_data.password)
     
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="user.update",
+        target_type="user",
+        target_id=str(user.id),
+        description=f"更新用户: {user.username}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="更新成功")
 
 
 @router.delete("/admin/{user_id}", response_model=ResponseModel)
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -150,8 +171,18 @@ def delete_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return ResponseModel(code=404, msg="用户不存在")
+    username = user.username
     
     db.delete(user)
     db.commit()
+
+    record_admin_action(
+        user=current_user,
+        action="user.delete",
+        target_type="user",
+        target_id=str(user_id),
+        description=f"删除用户: {username}",
+        request=request,
+    )
     
     return ResponseModel(code=200, msg="删除成功")

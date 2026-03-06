@@ -2,7 +2,7 @@
 """
 分类标签管理相关接口
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
@@ -13,6 +13,7 @@ from app.schemas.article import (
     CategoryCreate, TagCreate
 )
 from app.schemas.common import ResponseModel
+from app.utils.audit import record_admin_action
 # from app.dependencies import get_db, get_current_admin  # 补充依赖
 
 
@@ -50,6 +51,7 @@ def get_categories(db: Session = Depends(get_db)):
 @router.post("/categories", response_model=ResponseModel)
 def create_category(
     category_in: CategoryCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -66,12 +68,21 @@ def create_category(
     )
     db.add(category)
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="category.create",
+        target_type="category",
+        target_id=str(category.id),
+        description=f"创建分类: {category.name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="创建成功")
 
 @router.put("/categories/{id}", response_model=ResponseModel)
 def update_category(
     id: int,
     category_in: CategoryCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -86,11 +97,20 @@ def update_category(
     category.quote = category_in.quote
     category.quote_author = category_in.quote_author
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="category.update",
+        target_type="category",
+        target_id=str(category.id),
+        description=f"更新分类: {category.name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="更新成功")
 
 @router.delete("/categories/{id}", response_model=ResponseModel)
 def delete_category(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -98,8 +118,17 @@ def delete_category(
     category = db.query(Category).filter(Category.id == id).first()
     if not category:
         return ResponseModel(code=404, msg="分类不存在")
+    category_name = category.name
     db.delete(category)
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="category.delete",
+        target_type="category",
+        target_id=str(id),
+        description=f"删除分类: {category_name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="删除成功")
 
 # --- Tags ---
@@ -129,6 +158,7 @@ def get_tags(
 @router.post("/tags", response_model=ResponseModel)
 def create_tag(
     tag_in: TagCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -138,12 +168,21 @@ def create_tag(
     tag = Tag(name=tag_in.name, color=tag_in.color)
     db.add(tag)
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="tag.create",
+        target_type="tag",
+        target_id=str(tag.id),
+        description=f"创建标签: {tag.name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="创建成功")
 
 @router.put("/tags/{id}", response_model=ResponseModel)
 def update_tag(
     id: int,
     tag_in: TagCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -154,11 +193,20 @@ def update_tag(
     tag.name = tag_in.name
     tag.color = tag_in.color
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="tag.update",
+        target_type="tag",
+        target_id=str(tag.id),
+        description=f"更新标签: {tag.name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="更新成功")
 
 @router.delete("/tags/{id}", response_model=ResponseModel)
 def delete_tag(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -166,6 +214,15 @@ def delete_tag(
     tag = db.query(Tag).filter(Tag.id == id).first()
     if not tag:
         return ResponseModel(code=404, msg="标签不存在")
+    tag_name = tag.name
     db.delete(tag)
     db.commit()
+    record_admin_action(
+        user=current_user,
+        action="tag.delete",
+        target_type="tag",
+        target_id=str(id),
+        description=f"删除标签: {tag_name}",
+        request=request,
+    )
     return ResponseModel(code=200, msg="删除成功")
