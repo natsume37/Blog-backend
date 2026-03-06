@@ -14,6 +14,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_admin
+from app.core.geo import normalize_china_province_name
 from app.models.user import User
 from app.models.monitor import VisitLog
 from app.schemas.common import ResponseModel, PagedData
@@ -82,8 +83,9 @@ def get_map_stats(
     
     result = []
     for province, count in stats:
+        normalized = normalize_china_province_name(province or "")
         # Clean province name (remove '省', '市' suffix for ECharts map matching)
-        name = province.replace("省", "").replace("市", "").replace("自治区", "").replace("壮族", "").replace("回族", "").replace("维吾尔", "")
+        name = normalized.replace("省", "").replace("市", "").replace("自治区", "").replace("壮族", "").replace("回族", "").replace("维吾尔", "")
         if name:
             result.append({"name": name, "value": count})
             
