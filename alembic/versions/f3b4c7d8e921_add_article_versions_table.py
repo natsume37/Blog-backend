@@ -32,7 +32,8 @@ def upgrade() -> None:
         sa.Column("seo_description", sa.String(length=500), nullable=True, server_default=""),
         sa.Column("seo_keywords", sa.String(length=500), nullable=True, server_default=""),
         sa.Column("category_id", sa.Integer(), nullable=True),
-        sa.Column("tag_ids", sa.Text(), nullable=True, server_default="[]"),
+        # MySQL does not allow defaults on TEXT columns.
+        sa.Column("tag_ids", sa.Text(), nullable=True),
         sa.Column("is_published", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("is_top", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("is_recommend", sa.Integer(), nullable=False, server_default=sa.text("0")),
