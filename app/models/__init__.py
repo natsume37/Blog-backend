@@ -10,5 +10,6 @@ from app.models.resource import Resource
 from app.models.audit_log import AuditLog
 from app.models.login_log import LoginLog
 from app.models.article_version import ArticleVersion
+from app.models.friend_link import FriendLink
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion"]
+__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion", "FriendLink"]

@@ -16,7 +16,7 @@ from app.models.monitor import VisitLog
 
 from app.core.config import settings
 from app.core.logger import setup_logging
-from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources, ai, audit_logs, login_logs
+from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources, ai, audit_logs, login_logs, friend_links
 from app.tasks import start_scheduler, stop_scheduler
 
 # Setup logging
@@ -235,6 +235,7 @@ app.include_router(resources.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(audit_logs.router, prefix="/api/v1")
 app.include_router(login_logs.router, prefix="/api/v1")
+app.include_router(friend_links.router, prefix="/api/v1")
 
 
 @app.get("/")
