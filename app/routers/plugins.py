@@ -30,12 +30,21 @@ router = APIRouter(prefix="/plugins", tags=["插件"])
 logger = logging.getLogger(__name__)
 
 
-def _friendly_plugin_error(exc: Exception) -> str:
-    from app.services.plugins.builtin.ai_plugin import friendly_ai_error
+def _friendly_plugin_error(exc: Exception, *, plugin_id: str | None = None, action: str | None = None) -> str:
+    from app.services.plugins.builtin.ai_plugin import friendly_ai_error, friendly_ai_image_error
+
+    if plugin_id == "wechat-official-account":
+        return _friendly_wechat_error(exc)
+    if plugin_id == "ai-assistant" and action in {"test_image_connection", "generate_image"}:
+        return friendly_ai_image_error(exc)
+    if plugin_id == "ai-assistant":
+        return friendly_ai_error(exc)
 
     message = str(exc or "").strip()
     if "WeChat" in message or "微信" in message:
         return _friendly_wechat_error(exc)
+    if "生图" in message or "图片" in message or "图库" in message:
+        return friendly_ai_image_error(exc)
     if "AI" in message or "Base URL" in message:
         return friendly_ai_error(exc)
     return message or "插件操作失败"
@@ -172,7 +181,7 @@ def update_plugin_settings(
     except Exception as exc:
         db.rollback()
         logger.error("Update plugin settings failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg=_friendly_plugin_error(exc))
+        return ResponseModel(code=500, msg=_friendly_plugin_error(exc, plugin_id=plugin_id))
 
 
 @router.post("/{plugin_id}/actions/{action}", response_model=ResponseModel[PluginActionResultResponse])
@@ -189,7 +198,7 @@ def call_plugin_action(
     if not spec:
         return ResponseModel(code=404, msg=f"插件不存在: {plugin_id}")
     item = get_plugin_with_state(db, plugin_id, settings)
-    if action != "test_connection" and not item["enabled"]:
+    if action not in {"test_connection", "test_image_connection"} and not item["enabled"]:
         return ResponseModel(code=400, msg="请先启用插件，再执行该动作")
     try:
         result = spec.call_action(action, payload.payload or {}, db, settings)
@@ -210,5 +219,6 @@ def call_plugin_action(
     except KeyError:
         return ResponseModel(code=404, msg=f"插件动作不存在: {action}")
     except Exception as exc:
+        db.rollback()
         logger.error("Call plugin action failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg=_friendly_plugin_error(exc))
+        return ResponseModel(code=500, msg=_friendly_plugin_error(exc, plugin_id=plugin_id, action=action))

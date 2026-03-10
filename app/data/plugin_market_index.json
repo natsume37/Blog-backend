@@ -11,10 +11,10 @@
     {
       "plugin_id": "ai-assistant",
       "name": "AI 助手",
-      "summary": "模型配置、文章草稿、摘要与 MCP 工具入口。",
-      "description": "管理 OpenAI 兼容模型配置，并为后台编辑器提供草稿生成、摘要生成和工具调用能力。",
-      "version": "1.1.0",
-      "latest_version": "1.1.0",
+      "summary": "文本生成、图片生成、MCP 工具和模型配置的一体化入口。",
+      "description": "统一管理 OpenAI 兼容模型配置，并为后台编辑器提供草稿生成、摘要生成、AI 生图和工具调用能力。",
+      "version": "1.2.0",
+      "latest_version": "1.2.0",
       "category": "core",
       "source": "github-market",
       "source_repo": "natsume37/Blog-backend",
@@ -34,9 +34,10 @@
       "support_url": "https://github.com/natsume37/Blog-backend/issues",
       "changelog_url": "https://github.com/natsume37/Blog-backend/commits/main",
       "manifest_url": "https://raw.githubusercontent.com/natsume37/Blog-plugin-market/main/plugins/ai-assistant.json",
-      "tags": ["ai", "editor", "mcp"],
-      "features": ["AI 草稿", "AI 摘要", "MCP 工具", "模型配置"],
-      "permissions": ["ai:completion", "article:write", "plugin:config"],
+      "tags": ["ai", "editor", "mcp", "image"],
+      "features": ["AI 草稿", "AI 摘要", "AI 生图", "MCP 工具", "模型配置", "图库入库"],
+      "capabilities": ["article_draft", "article_summary", "mcp_tools", "model_settings", "image_generation", "resource_library"],
+      "permissions": ["network", "site_settings", "resource_write"],
       "compatibility": {
         "backend": ">=1.0.0",
         "frontend": ">=1.0.0"
@@ -63,6 +64,19 @@
           "icon": "MagicStick",
           "render_mode": "local",
           "entry_url": ""
+        },
+        {
+          "key": "images",
+          "path": "/admin/plugins/ai-assistant/images",
+          "route_name": "plugin-ai-assistant-images",
+          "title": "AI 生图",
+          "menu_label": "AI 生图",
+          "component_key": "plugin.ai.image",
+          "icon": "PictureFilled",
+          "render_mode": "local",
+          "entry_url": "",
+          "script_url": "",
+          "layout": "workspace"
         }
       ]
     },
@@ -121,65 +135,6 @@
           "icon": "Promotion",
           "render_mode": "local",
           "entry_url": ""
-        }
-      ]
-    },
-    {
-      "plugin_id": "ai-image-studio",
-      "name": "AI 生图工作室",
-      "summary": "在后台用提示词生成图片，并可直接写入站点图库。",
-      "description": "面向后台内容运营的 AI 生图插件，支持提示词、负面提示词、尺寸、质量、输出格式和一键入库图库。",
-      "version": "1.0.0",
-      "latest_version": "1.0.0",
-      "category": "automation",
-      "source": "github-market",
-      "source_repo": "natsume37/Blog-backend",
-      "author": "Martin",
-      "icon": "PictureFilled",
-      "official": true,
-      "verified": true,
-      "builtin": true,
-      "installable": true,
-      "activatable": true,
-      "license": "MIT",
-      "pricing": "free",
-      "published_at": "2026-03-10T00:00:00Z",
-      "homepage": "https://martin88.xyz",
-      "repo_url": "https://github.com/natsume37/Blog-backend",
-      "docs_url": "https://github.com/natsume37/Blog-plugin-market/tree/main/plugins/ai-image-studio",
-      "support_url": "https://github.com/natsume37/Blog-backend/issues",
-      "changelog_url": "https://github.com/natsume37/Blog-plugin-market/blob/main/plugins/ai-image-studio/CHANGELOG.md",
-      "manifest_url": "https://raw.githubusercontent.com/natsume37/Blog-plugin-market/main/plugins/ai-image-studio.json",
-      "tags": ["ai", "image", "design", "gallery"],
-      "features": ["提示词生图", "尺寸控制", "质量控制", "一键入库图库"],
-      "permissions": ["network", "site_settings", "resource_write"],
-      "compatibility": {
-        "backend": ">=1.0.0",
-        "frontend": ">=1.0.0"
-      },
-      "delivery": {
-        "type": "builtin",
-        "entry_mode": "local",
-        "install_strategy": "builtin-toggle",
-        "entry_url": ""
-      },
-      "publisher": {
-        "name": "Martin",
-        "url": "https://github.com/natsume37"
-      },
-      "screenshots": [],
-      "admin_pages": [
-        {
-          "key": "studio",
-          "path": "/admin/plugins/ai-image-studio/studio",
-          "route_name": "plugin-ai-image-studio-studio",
-          "title": "AI 生图工作室",
-          "menu_label": "AI 生图",
-          "component_key": "plugin.ai.image",
-          "icon": "PictureFilled",
-          "render_mode": "local",
-          "entry_url": "",
-          "layout": "workspace"
         }
       ]
     },

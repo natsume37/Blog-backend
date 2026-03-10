@@ -6,14 +6,12 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models.plugin import PluginInstall
 from app.services.plugins.base import PluginSpec
-from app.services.plugins.builtin.ai_image_plugin import AI_IMAGE_PLUGIN
 from app.services.plugins.builtin.ai_plugin import AI_PLUGIN
 from app.services.plugins.builtin.wechat_official import WECHAT_PLUGIN
 from app.services.plugins.storage import get_plugin_record
 
 
 _REGISTRY: dict[str, PluginSpec] = {
-    AI_IMAGE_PLUGIN.plugin_id: AI_IMAGE_PLUGIN,
     AI_PLUGIN.plugin_id: AI_PLUGIN,
     WECHAT_PLUGIN.plugin_id: WECHAT_PLUGIN,
 }
