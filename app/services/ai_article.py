@@ -1,72 +1,9 @@
-import json
-import re
 from datetime import datetime
 from typing import Any
-from urllib import request as urllib_request
 
 from app.core.config import Settings
 from app.schemas.ai import AIDraftRequest, AISummaryRequest
-
-
-def _supports_json_output(settings: Settings) -> bool:
-    provider = (settings.AI_PROVIDER or "").lower()
-    base_url = (settings.AI_BASE_URL or "").lower()
-    return (
-        "deepseek" in provider
-        or "openai" in provider
-        or "deepseek" in base_url
-        or "openai" in base_url
-    )
-
-
-def _attach_json_output(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
-    if _supports_json_output(settings):
-        payload["response_format"] = {"type": "json_object"}
-    return payload
-
-
-def _content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts).strip()
-    return ""
-
-
-def _extract_json_dict(raw_text: str) -> dict[str, Any] | None:
-    text = (raw_text or "").strip()
-    if not text:
-        return None
-
-    # 兼容 ```json ... ``` 代码块格式
-    fence = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", text, flags=re.IGNORECASE | re.DOTALL)
-    if fence:
-        text = fence.group(1).strip()
-
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
-        pass
-
-    # 兼容前后夹杂说明文字的场景，尝试从任意位置解码首个 JSON 对象
-    decoder = json.JSONDecoder()
-    for i, ch in enumerate(text):
-        if ch != "{":
-            continue
-        try:
-            obj, _ = decoder.raw_decode(text[i:])
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
-    return None
+from app.services.ai_common import extract_json_dict, request_chat_completion
 
 
 def _build_payload(data: AIDraftRequest) -> dict[str, Any]:
@@ -146,28 +83,13 @@ def generate_article_draft(data: AIDraftRequest, settings: Settings) -> dict[str
         return _fallback_draft(data, settings)
 
     payload = _build_payload(data)
-    payload["model"] = settings.AI_MODEL
-    payload = _attach_json_output(payload, settings)
-    body = json.dumps(payload).encode("utf-8")
-    endpoint = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-    req = urllib_request.Request(
-        endpoint,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.AI_API_KEY}",
-        },
+    content = request_chat_completion(
+        payload["messages"],
+        settings,
+        temperature=payload["temperature"],
+        force_json=True,
     )
-    with urllib_request.urlopen(req, timeout=settings.AI_TIMEOUT_SECONDS) as resp:
-        raw = resp.read().decode("utf-8")
-        data_json = json.loads(raw)
-    content = _content_to_text(
-        data_json.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    parsed = _extract_json_dict(content)
+    parsed = extract_json_dict(content)
     if not parsed:
         # 非结构化内容时回退：尽量保留 AI 返回正文，避免直接报错
         fallback = _fallback_draft(data, settings)
@@ -224,34 +146,19 @@ def generate_article_summary(data: AISummaryRequest, settings: Settings) -> dict
         f"正文:\n{data.content_markdown}\n"
     )
     payload = {
-        "model": settings.AI_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.3,
     }
-    payload = _attach_json_output(payload, settings)
-    body = json.dumps(payload).encode("utf-8")
-    endpoint = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-    req = urllib_request.Request(
-        endpoint,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.AI_API_KEY}",
-        },
+    content = request_chat_completion(
+        payload["messages"],
+        settings,
+        temperature=payload["temperature"],
+        force_json=True,
     )
-    with urllib_request.urlopen(req, timeout=settings.AI_TIMEOUT_SECONDS) as resp:
-        raw = resp.read().decode("utf-8")
-        data_json = json.loads(raw)
-    content = _content_to_text(
-        data_json.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    parsed = _extract_json_dict(content)
+    parsed = extract_json_dict(content)
     summary = (parsed.get("summary") or "").strip() if parsed else ""
     if not summary and content:
         summary = _strip_markdown(content).strip()

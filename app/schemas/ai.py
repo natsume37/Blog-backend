@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -51,3 +51,29 @@ class AIConfigTestResult(BaseModel):
     provider: str
     model: str
     latency_ms: int
+
+
+class MCPToolDefinition(BaseModel):
+    name: str
+    description: str
+    inputSchema: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPToolCallRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80, description="工具名称")
+    arguments: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+
+
+class MCPToolContentItem(BaseModel):
+    type: Literal["text"] = "text"
+    text: str = ""
+
+
+class MCPToolCallResponse(BaseModel):
+    name: str
+    mode: str = "fallback"
+    provider: str
+    model: str
+    structuredContent: Dict[str, Any] = Field(default_factory=dict)
+    content: List[MCPToolContentItem] = Field(default_factory=list)
+    isError: bool = False
