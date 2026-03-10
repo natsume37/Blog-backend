@@ -4,106 +4,158 @@ on:
   push:
     branches: [main]
 
+env:
+  DEPLOY_SSH_CONNECT_TIMEOUT: 30s
+  DEPLOY_COMMAND_TIMEOUT: 10m
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_SCRIPT: |
+        # 遇到错误立即停止
+        set -euo pipefail
+
+        # 1. 进入项目目录
+        cd ~/work/blog/Blog-backend
+
+        # 1.1 关键 Secret 预检查（为空时直接失败，避免迁移阶段才报错）
+        if [ -z "${{ secrets.SECRET_KEY }}" ]; then
+            echo "ERROR: GitHub secret SECRET_KEY is missing or empty."
+            exit 1
+        fi
+
+        # 2. 拉取最新代码
+        git pull origin main
+
+        # 2.1 注入环境变量 (从 GitHub Secrets)
+        echo "Generating .env.prod file..."
+        cat <<'EOF' > .env.prod
+        # --- 基础配置 ---
+        APP_NAME=Blog-Backend
+        APP_VERSION=1.0.0
+        ENVIRONMENT=production
+        DEBUG=false
+        HOST=0.0.0.0
+        PORT=8090
+        API_V1_PREFIX=/api/v1
+
+        # --- 数据库 & Redis ---
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        DATABASE_POOL_SIZE=20
+        DATABASE_MAX_OVERFLOW=10
+        REDIS_URL=${{ secrets.REDIS_URL }}
+
+        # --- 日志 ---
+        LOG_LEVEL=INFO
+        LOG_FILE_PATH=./logs
+
+        # --- 安全 ---
+        SECRET_KEY=${{ secrets.SECRET_KEY }}
+        ALGORITHM=HS256
+        ACCESS_TOKEN_EXPIRE_MINUTES=10080
+
+        # --- 邮件服务 ---
+        SMTP_HOST=${{ secrets.SMTP_HOST }}
+        SMTP_PORT=${{ secrets.SMTP_PORT }}
+        SMTP_USER=${{ secrets.SMTP_USER }}
+        SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+        EMAILS_FROM_EMAIL=${{ secrets.EMAILS_FROM_EMAIL }}
+        EMAILS_FROM_NAME=${{ secrets.EMAILS_FROM_NAME }}
+
+        # --- 七牛云 ---
+        QINIU_ACCESS_KEY=${{ secrets.QINIU_ACCESS_KEY }}
+        QINIU_SECRET_KEY=${{ secrets.QINIU_SECRET_KEY }}
+        QINIU_BUCKET=${{ secrets.QINIU_BUCKET }}
+        QINIU_DOMAIN=${{ secrets.QINIU_DOMAIN }}
+
+        # --- 七牛云时间戳防盗链 ---
+        QINIU_TIMESTAMP_ENABLED=${{ secrets.QINIU_TIMESTAMP_ENABLED }}
+        QINIU_TIMESTAMP_KEY=${{ secrets.QINIU_TIMESTAMP_KEY }}
+        QINIU_TIMESTAMP_EXPIRE=${{ secrets.QINIU_TIMESTAMP_EXPIRE }}
+        
+        # --- 安全加强 (防盗链) ---
+        # 请在 GitHub Secrets 中配置 CORS_ORIGINS 为 JSON 格式数组，例如: ["https://martin88.xyz", "https://www.martin88.xyz"]
+        CORS_ORIGINS='${{ secrets.CORS_ORIGINS }}'
+        ENABLE_REFERER_CHECK=${{ secrets.ENABLE_REFERER_CHECK }}
+
+        # --- GeoIP ---
+        GEOIP_ENABLED=true
+        GEOIP_PROVIDER_URL=https://api.ip2location.io/?ip={ip}
+        EOF
+
+        # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
+        if ! command -v uv &> /dev/null; then
+            echo "Installing uv..."
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            source $HOME/.cargo/env
+        fi
+
+        # 4. 同步依赖
+        # uv sync 会自动读取 pyproject.toml，创建/更新 .venv
+        echo "Syncing dependencies..."
+        uv sync --frozen
+
+        # 5. 执行数据库迁移 (设置 ENVIRONMENT 确保使用生产配置)
+        echo "Running database migrations..."
+        ENVIRONMENT=production uv run alembic upgrade head
+
+        # 6. 重启服务
+        sudo systemctl restart fastapi-blog.service
+
+        echo "Deployment successful!"
     steps:
-      - name: Deploy to Server via SSH
+      - name: Deploy to Server via SSH (Attempt 1)
+        id: deploy_1
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          script: |
-            # 遇到错误立即停止
-            set -euo pipefail
+          timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
+          command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
+          script: ${{ env.DEPLOY_SCRIPT }}
 
-            # 1. 进入项目目录
-            cd ~/work/blog/Blog-backend
+      - name: Wait Before Retry 2
+        if: steps.deploy_1.outcome == 'failure'
+        run: sleep 15
 
-            # 1.1 关键 Secret 预检查（为空时直接失败，避免迁移阶段才报错）
-            if [ -z "${{ secrets.SECRET_KEY }}" ]; then
-                echo "ERROR: GitHub secret SECRET_KEY is missing or empty."
-                exit 1
-            fi
+      - name: Deploy to Server via SSH (Attempt 2)
+        if: steps.deploy_1.outcome == 'failure'
+        id: deploy_2
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
+          command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
+          script: ${{ env.DEPLOY_SCRIPT }}
 
-            # 2. 拉取最新代码
-            git pull origin main
+      - name: Wait Before Retry 3
+        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
+        run: sleep 15
 
-            # 2.1 注入环境变量 (从 GitHub Secrets)
-            echo "Generating .env.prod file..."
-            cat <<'EOF' > .env.prod
-            # --- 基础配置 ---
-            APP_NAME=Blog-Backend
-            APP_VERSION=1.0.0
-            ENVIRONMENT=production
-            DEBUG=false
-            HOST=0.0.0.0
-            PORT=8090
-            API_V1_PREFIX=/api/v1
+      - name: Deploy to Server via SSH (Attempt 3)
+        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
+        id: deploy_3
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
+          command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
+          script: ${{ env.DEPLOY_SCRIPT }}
 
-            # --- 数据库 & Redis ---
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            DATABASE_POOL_SIZE=20
-            DATABASE_MAX_OVERFLOW=10
-            REDIS_URL=${{ secrets.REDIS_URL }}
-
-            # --- 日志 ---
-            LOG_LEVEL=INFO
-            LOG_FILE_PATH=./logs
-
-            # --- 安全 ---
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            ALGORITHM=HS256
-            ACCESS_TOKEN_EXPIRE_MINUTES=10080
-
-            # --- 邮件服务 ---
-            SMTP_HOST=${{ secrets.SMTP_HOST }}
-            SMTP_PORT=${{ secrets.SMTP_PORT }}
-            SMTP_USER=${{ secrets.SMTP_USER }}
-            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
-            EMAILS_FROM_EMAIL=${{ secrets.EMAILS_FROM_EMAIL }}
-            EMAILS_FROM_NAME=${{ secrets.EMAILS_FROM_NAME }}
-
-            # --- 七牛云 ---
-            QINIU_ACCESS_KEY=${{ secrets.QINIU_ACCESS_KEY }}
-            QINIU_SECRET_KEY=${{ secrets.QINIU_SECRET_KEY }}
-            QINIU_BUCKET=${{ secrets.QINIU_BUCKET }}
-            QINIU_DOMAIN=${{ secrets.QINIU_DOMAIN }}
-
-            # --- 七牛云时间戳防盗链 ---
-            QINIU_TIMESTAMP_ENABLED=${{ secrets.QINIU_TIMESTAMP_ENABLED }}
-            QINIU_TIMESTAMP_KEY=${{ secrets.QINIU_TIMESTAMP_KEY }}
-            QINIU_TIMESTAMP_EXPIRE=${{ secrets.QINIU_TIMESTAMP_EXPIRE }}
-            
-            # --- 安全加强 (防盗链) ---
-            # 请在 GitHub Secrets 中配置 CORS_ORIGINS 为 JSON 格式数组，例如: ["https://martin88.xyz", "https://www.martin88.xyz"]
-            CORS_ORIGINS='${{ secrets.CORS_ORIGINS }}'
-            ENABLE_REFERER_CHECK=${{ secrets.ENABLE_REFERER_CHECK }}
-
-            # --- GeoIP ---
-            GEOIP_ENABLED=true
-            GEOIP_PROVIDER_URL=https://api.ip2location.io/?ip={ip}
-            EOF
-
-            # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
-            if ! command -v uv &> /dev/null; then
-                echo "Installing uv..."
-                curl -LsSf https://astral.sh/uv/install.sh | sh
-                source $HOME/.cargo/env
-            fi
-
-            # 4. 同步依赖
-            # uv sync 会自动读取 pyproject.toml，创建/更新 .venv
-            echo "Syncing dependencies..."
-            uv sync --frozen
-
-            # 5. 执行数据库迁移 (设置 ENVIRONMENT 确保使用生产配置)
-            echo "Running database migrations..."
-            ENVIRONMENT=production uv run alembic upgrade head
-
-            # 6. 重启服务
-            sudo systemctl restart fastapi-blog.service
-
-            echo "Deployment successful!"
+      - name: Fail When All Deploy Attempts Failed
+        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure' && steps.deploy_3.outcome == 'failure'
+        run: |
+          echo "Backend deploy failed after 3 SSH attempts."
+          exit 1
