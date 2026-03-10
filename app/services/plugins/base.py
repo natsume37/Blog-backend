@@ -39,6 +39,10 @@ class PluginAdminPage:
     menu_label: str
     component_key: str
     icon: str = "Grid"
+    render_mode: str = "local"
+    entry_url: str = ""
+    script_url: str = ""
+    layout: str = "panel"
 
 
 @dataclass(frozen=True)

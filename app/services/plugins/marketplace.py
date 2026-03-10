@@ -61,6 +61,33 @@ def _normalize_list(value: Any) -> list[str]:
     return items
 
 
+def _normalize_admin_pages(settings: Settings, value: Any, *, manifest_url: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        route_name = str(item.get("route_name") or item.get("routeName") or "").strip()
+        title = str(item.get("title") or item.get("label") or f"Plugin Page {index + 1}").strip()
+        menu_label = str(item.get("menu_label") or item.get("menuLabel") or item.get("label") or title).strip()
+        component_key = str(item.get("component_key") or item.get("componentKey") or "").strip()
+        items.append({
+            "path": path,
+            "route_name": route_name,
+            "title": title,
+            "menu_label": menu_label,
+            "component_key": component_key,
+            "icon": str(item.get("icon") or "Grid").strip() or "Grid",
+            "render_mode": str(item.get("render_mode") or item.get("renderMode") or "local").strip() or "local",
+            "entry_url": _build_market_url(settings, str(item.get("entry_url") or item.get("entryUrl") or ""), base_url=manifest_url),
+            "script_url": _build_market_url(settings, str(item.get("script_url") or item.get("scriptUrl") or ""), base_url=manifest_url),
+            "layout": str(item.get("layout") or "panel").strip() or "panel",
+        })
+    return items
+
+
 def _normalize_manifest(
     manifest: dict[str, Any],
     index_entry: dict[str, Any],
@@ -153,7 +180,7 @@ def _normalize_manifest(
         },
         "screenshots": screenshots,
         "settings_schema": manifest.get("settings_schema") if isinstance(manifest.get("settings_schema"), list) else [],
-        "admin_pages": manifest.get("admin_pages") if isinstance(manifest.get("admin_pages"), list) else [],
+        "admin_pages": _normalize_admin_pages(settings, manifest.get("admin_pages"), manifest_url=manifest_url),
         "actions": manifest.get("actions") if isinstance(manifest.get("actions"), list) else [],
     }
 

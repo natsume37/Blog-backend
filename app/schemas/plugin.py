@@ -29,6 +29,8 @@ class PluginAdminPageResponse(BaseModel):
     icon: str = "Grid"
     render_mode: str = "local"
     entry_url: str = ""
+    script_url: str = ""
+    layout: str = "panel"
 
 
 class PluginActionResponse(BaseModel):

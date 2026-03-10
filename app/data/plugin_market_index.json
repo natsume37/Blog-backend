@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-10T13:40:00Z",
+  "generated_at": "2026-03-10T22:30:00+08:00",
   "marketplace": {
     "name": "Blog Plugin Market",
     "repo": "natsume37/Blog-plugin-market",
@@ -121,6 +121,65 @@
           "icon": "Promotion",
           "render_mode": "local",
           "entry_url": ""
+        }
+      ]
+    },
+    {
+      "plugin_id": "ai-image-studio",
+      "name": "AI 生图工作室",
+      "summary": "在后台用提示词生成图片，并可直接写入站点图库。",
+      "description": "面向后台内容运营的 AI 生图插件，支持提示词、负面提示词、尺寸、质量、输出格式和一键入库图库。",
+      "version": "1.0.0",
+      "latest_version": "1.0.0",
+      "category": "automation",
+      "source": "github-market",
+      "source_repo": "natsume37/Blog-backend",
+      "author": "Martin",
+      "icon": "PictureFilled",
+      "official": true,
+      "verified": true,
+      "builtin": true,
+      "installable": true,
+      "activatable": true,
+      "license": "MIT",
+      "pricing": "free",
+      "published_at": "2026-03-10T00:00:00Z",
+      "homepage": "https://martin88.xyz",
+      "repo_url": "https://github.com/natsume37/Blog-backend",
+      "docs_url": "https://github.com/natsume37/Blog-plugin-market/tree/main/plugins/ai-image-studio",
+      "support_url": "https://github.com/natsume37/Blog-backend/issues",
+      "changelog_url": "https://github.com/natsume37/Blog-plugin-market/blob/main/plugins/ai-image-studio/CHANGELOG.md",
+      "manifest_url": "https://raw.githubusercontent.com/natsume37/Blog-plugin-market/main/plugins/ai-image-studio.json",
+      "tags": ["ai", "image", "design", "gallery"],
+      "features": ["提示词生图", "尺寸控制", "质量控制", "一键入库图库"],
+      "permissions": ["network", "site_settings", "resource_write"],
+      "compatibility": {
+        "backend": ">=1.0.0",
+        "frontend": ">=1.0.0"
+      },
+      "delivery": {
+        "type": "builtin",
+        "entry_mode": "local",
+        "install_strategy": "builtin-toggle",
+        "entry_url": ""
+      },
+      "publisher": {
+        "name": "Martin",
+        "url": "https://github.com/natsume37"
+      },
+      "screenshots": [],
+      "admin_pages": [
+        {
+          "key": "studio",
+          "path": "/admin/plugins/ai-image-studio/studio",
+          "route_name": "plugin-ai-image-studio-studio",
+          "title": "AI 生图工作室",
+          "menu_label": "AI 生图",
+          "component_key": "plugin.ai.image",
+          "icon": "PictureFilled",
+          "render_mode": "local",
+          "entry_url": "",
+          "layout": "workspace"
         }
       ]
     },
