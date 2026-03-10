@@ -21,7 +21,7 @@ from app.services.plugins.base import (
     PluginSpec,
 )
 from app.services.plugins.storage import get_plugin_settings_map
-from app.utils.qiniu import generate_qiniu_timestamp_url
+from app.utils.qiniu import build_qiniu_base_url, generate_qiniu_timestamp_url
 
 
 AI_PLUGIN_ID = "ai-assistant"
@@ -313,7 +313,7 @@ def _build_prompt(prompt: str, negative_prompt: str) -> str:
 
 
 def _build_qiniu_preview_url(key: str, settings: Settings) -> str:
-    base_url = f"{settings.QINIU_DOMAIN.rstrip('/')}/{key.lstrip('/')}"
+    base_url = build_qiniu_base_url(settings.QINIU_DOMAIN, key)
     expire_seconds = settings.QINIU_TIMESTAMP_EXPIRE if settings.is_qiniu_timestamp_enabled else 3600
     if settings.is_qiniu_timestamp_enabled:
         return generate_qiniu_timestamp_url(

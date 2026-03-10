@@ -3,10 +3,12 @@ import time
 import urllib.parse
 import re
 from typing import Optional
+from qiniu import Auth
 
 # URL签名密钥（用于前后端加密验证）
 # 如果需要更高安全性，建议移入 app/core/config.py 或环境变量
 URL_SIGN_SECRET = "martin_blog_2024_secret_key"
+QINIU_SECURITY_QUERY_KEYS = {"sign", "t", "e", "token"}
 
 def generate_signed_key(key: str, timestamp: int) -> str:
     """生成资源key的签名 (用于前端直传后的验证)"""
@@ -23,6 +25,7 @@ def generate_qiniu_timestamp_url(base_url: str, key: str, timestamp_key: str, ex
     生成七牛云时间戳防盗链URL
     """
     try:
+        base_url = normalize_remote_url(base_url)
         # 计算过期时间戳并转为16进制小写
         expire_time = int(time.time()) + expire_seconds
         t = format(expire_time, 'x')  # 转为16进制小写
@@ -45,6 +48,60 @@ def generate_qiniu_timestamp_url(base_url: str, key: str, timestamp_key: str, ex
     except Exception as e:
         print(f"Error generating qiniu url: {e}")
         return base_url
+
+
+def _encode_url_path(path: str) -> str:
+    if not path:
+        return path
+
+    encoded_parts = [urllib.parse.quote(urllib.parse.unquote(part), safe='') for part in path.split('/')]
+    return '/'.join(encoded_parts)
+
+
+def normalize_remote_url(url: str) -> str:
+    """规范化远程 URL，避免路径中的空格或中文导致请求异常。"""
+    if not url:
+        return url
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if not parsed.scheme or not parsed.netloc:
+            return url
+
+        normalized_path = _encode_url_path(parsed.path)
+        normalized_query = parsed.query.replace(" ", "%20")
+        normalized_fragment = parsed.fragment.replace(" ", "%20")
+        return urllib.parse.urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            normalized_path,
+            normalized_query,
+            normalized_fragment,
+        ))
+    except Exception:
+        return url
+
+
+def build_qiniu_base_url(domain: str, key: str) -> str:
+    normalized_key = _encode_url_path(key.lstrip("/"))
+    return f"{domain.rstrip('/')}/{normalized_key}"
+
+
+def _strip_qiniu_security_query(parsed: urllib.parse.ParseResult) -> str:
+    query_params = urllib.parse.parse_qs(parsed.query)
+
+    for key in QINIU_SECURITY_QUERY_KEYS:
+        query_params.pop(key, None)
+
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    return urllib.parse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        _encode_url_path(parsed.path),
+        parsed.params,
+        new_query,
+        parsed.fragment
+    ))
 
 def strip_qiniu_params(content: str, qiniu_domain: str) -> str:
     """
@@ -73,47 +130,30 @@ def strip_qiniu_params(content: str, qiniu_domain: str) -> str:
         full_url = match.group(0)
         
         try:
-            # 解析 URL
             parsed = urllib.parse.urlparse(full_url)
-            
-            # 解析查询参数
-            query_params = urllib.parse.parse_qs(parsed.query)
-            
-            # 移除 sign 和 t
-            if 'sign' in query_params:
-                del query_params['sign']
-            if 't' in query_params:
-                del query_params['t']
-            
-            # 重组查询字符串
-            new_query = urllib.parse.urlencode(query_params, doseq=True)
-            
-            # 重组 URL
-            new_url = urllib.parse.urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                parsed.params,
-                new_query,
-                parsed.fragment
-            ))
-            
-            return new_url
+            return _strip_qiniu_security_query(parsed)
         except:
             return full_url
 
     # 构造正则：http(s)://domain... 直到遇到 空格、引号、括号、换行等结束符
     # 注意转义域名中的点号
     escaped_domain = re.escape(domain)
-    pattern = rf"https?://{escaped_domain}[^\s\"')\]]*"
+    pattern = rf"https?://{escaped_domain}[^\n\r\"')\]]*"
     
     return re.sub(pattern, replacer, content)
 
-def refresh_qiniu_params_in_content(content: str, qiniu_domain: str, timestamp_key: str, expire_seconds: int = 3600) -> str:
+def refresh_qiniu_params_in_content(
+    content: str,
+    qiniu_domain: str,
+    timestamp_key: str,
+    expire_seconds: int = 3600,
+    access_key: Optional[str] = None,
+    secret_key: Optional[str] = None,
+) -> str:
     """
     刷新内容中七牛云链接的签名 (读取时使用)
     """
-    if not content or not qiniu_domain or not timestamp_key:
+    if not content or not qiniu_domain:
         return content
         
     domain = qiniu_domain.replace("http://", "").replace("https://", "")
@@ -122,38 +162,25 @@ def refresh_qiniu_params_in_content(content: str, qiniu_domain: str, timestamp_k
         full_url = match.group(0)
         
         try:
-            # 1. 先清洗现有 URL (去掉旧的 sign 和 t)
-            # 解析 URL
             parsed = urllib.parse.urlparse(full_url)
-            query_params = urllib.parse.parse_qs(parsed.query)
-            
-            if 'sign' in query_params:
-                del query_params['sign']
-            if 't' in query_params:
-                del query_params['t']
-                
-            new_query = urllib.parse.urlencode(query_params, doseq=True)
-            clean_url = urllib.parse.urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                parsed.params,
-                new_query,
-                parsed.fragment
-            ))
-            
-            # 2. 提取 Key (path部分，去掉开头的 /)
-            key = parsed.path.lstrip('/')
+            clean_url = _strip_qiniu_security_query(parsed)
+            key = urllib.parse.unquote(parsed.path.lstrip('/'))
             if not key:
                 return full_url
-                
-            # 3. 生成新签名
-            return generate_qiniu_timestamp_url(clean_url, key, timestamp_key, expire_seconds)
+
+            if timestamp_key:
+                return generate_qiniu_timestamp_url(clean_url, key, timestamp_key, expire_seconds)
+
+            if access_key and secret_key:
+                q = Auth(access_key, secret_key)
+                return q.private_download_url(clean_url, expires=expire_seconds)
+
+            return clean_url
         except:
             return full_url
 
     escaped_domain = re.escape(domain)
     # 匹配 URL，并在结尾处小心处理 markdown 括号
-    pattern = rf"https?://{escaped_domain}[^\s\"')\]]*"
+    pattern = rf"https?://{escaped_domain}[^\n\r\"')\]]*"
     
     return re.sub(pattern, replacer, content)

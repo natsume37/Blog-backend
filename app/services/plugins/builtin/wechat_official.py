@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models.article import Article
 from app.models.user import User
+from app.utils.qiniu import normalize_remote_url
 from app.services.plugins.base import (
     PluginActionSpec,
     PluginAdminPage,
@@ -99,12 +100,13 @@ def _post_multipart(url: str, *, file_field: str, filename: str, file_bytes: byt
 
 
 def _download_binary(url: str, timeout: int = 30) -> tuple[bytes, str, str]:
-    req = urllib_request.Request(url, headers={"User-Agent": "BlogPlugin/1.0"})
+    normalized_url = normalize_remote_url(url)
+    req = urllib_request.Request(normalized_url, headers={"User-Agent": "BlogPlugin/1.0"})
     with urllib_request.urlopen(req, timeout=timeout) as resp:
         content_type = resp.headers.get_content_type() or "application/octet-stream"
         data = resp.read()
-    parsed = urlparse.urlparse(url)
-    filename = os.path.basename(parsed.path) or f"wechat-{uuid.uuid4().hex}"
+    parsed = urlparse.urlparse(normalized_url)
+    filename = os.path.basename(urlparse.unquote(parsed.path)) or f"wechat-{uuid.uuid4().hex}"
     if "." not in filename:
         ext = mimetypes.guess_extension(content_type) or ".bin"
         filename = f"{filename}{ext}"

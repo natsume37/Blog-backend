@@ -71,6 +71,25 @@ def _create_article_version_snapshot(db: Session, article: Article, operator_id:
     ))
 
 
+def _strip_article_qiniu_access(value: str, settings: Settings) -> str:
+    if not value or not settings.is_qiniu_enabled:
+        return value
+    return strip_qiniu_params(value, settings.QINIU_DOMAIN)
+
+
+def _refresh_article_qiniu_access(value: str, settings: Settings) -> str:
+    if not value or not settings.is_qiniu_enabled:
+        return value
+    return refresh_qiniu_params_in_content(
+        value,
+        settings.QINIU_DOMAIN,
+        settings.QINIU_TIMESTAMP_KEY if settings.is_qiniu_timestamp_enabled else "",
+        settings.QINIU_TIMESTAMP_EXPIRE,
+        settings.QINIU_ACCESS_KEY,
+        settings.QINIU_SECRET_KEY,
+    )
+
+
 @router.get("/admin/list", response_model=ResponseModel[PagedData[ArticleAdminListItem]])
 def get_admin_articles(
     current: int = Query(1, ge=1),
@@ -97,19 +116,11 @@ def get_admin_articles(
     total = query.count()
     articles = query.offset((current - 1) * size).limit(size).all()
     
-    # 获取七牛配置
-    qiniu_domain = settings.QINIU_DOMAIN
-    timestamp_key = settings.QINIU_TIMESTAMP_KEY
-    expire = settings.QINIU_TIMESTAMP_EXPIRE
-    
     records = []
     for article in articles:
         category_name = article.category.name if article.category else ""
         
-        # 刷新 cover 中的签名链接
-        cover = article.cover
-        if settings.is_qiniu_timestamp_enabled and cover:
-            cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+        cover = _refresh_article_qiniu_access(article.cover, settings)
             
         records.append(ArticleAdminListItem(
             id=article.id,
@@ -164,10 +175,10 @@ def create_article(
     # 剥离七牛云签名的逻辑
     content = article_in.content
     cover = article_in.cover
-    if settings.is_qiniu_timestamp_enabled:
-        content = strip_qiniu_params(content, settings.QINIU_DOMAIN)
+    if settings.is_qiniu_enabled:
+        content = _strip_article_qiniu_access(content, settings)
         if cover:
-            cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
+            cover = _strip_article_qiniu_access(cover, settings)
             
     article = Article(
         title=article_in.title,
@@ -242,16 +253,14 @@ def update_article(
     if article_in.summary is not None:
         article.summary = article_in.summary
     if article_in.content is not None:
-        # 剥离签名
         content = article_in.content
-        if settings.is_qiniu_timestamp_enabled:
-            content = strip_qiniu_params(content, settings.QINIU_DOMAIN)
+        if settings.is_qiniu_enabled:
+            content = _strip_article_qiniu_access(content, settings)
         article.content = content
     if article_in.cover is not None:
-        # 剥离签名
         cover = article_in.cover
-        if settings.is_qiniu_timestamp_enabled and cover:
-            cover = strip_qiniu_params(cover, settings.QINIU_DOMAIN)
+        if settings.is_qiniu_enabled and cover:
+            cover = _strip_article_qiniu_access(cover, settings)
         article.cover = cover
     if article_in.seo_title is not None:
         article.seo_title = article_in.seo_title
@@ -564,18 +573,10 @@ def get_articles(
     # Format response
     records = []
     
-    # 获取七牛配置
-    qiniu_domain = settings.QINIU_DOMAIN
-    timestamp_key = settings.QINIU_TIMESTAMP_KEY
-    expire = settings.QINIU_TIMESTAMP_EXPIRE
-    
     for article in articles:
         category_name = article.category.name if article.category else ""
         
-        # 刷新 cover 中的签名链接
-        cover = article.cover
-        if settings.is_qiniu_timestamp_enabled and cover:
-            cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+        cover = _refresh_article_qiniu_access(article.cover, settings)
             
         records.append(ArticleListItem(
             id=article.id,
@@ -655,20 +656,12 @@ def get_article(
         # 构建返回
         content = article.content if show_content else "文章受保护，请输入验证答案后查看。"
         
-        # 刷新内容和封面中的签名链接
         cover = article.cover
-        if settings.is_qiniu_timestamp_enabled:
-            qiniu_domain = settings.QINIU_DOMAIN
-            timestamp_key = settings.QINIU_TIMESTAMP_KEY
-            expire = settings.QINIU_TIMESTAMP_EXPIRE
-            
-            # 仅在有权查看内容时刷新内容中的链接
+        if settings.is_qiniu_enabled:
             if show_content:
-                content = refresh_qiniu_params_in_content(content, qiniu_domain, timestamp_key, expire)
-            
-            # 刷新封面链接
+                content = _refresh_article_qiniu_access(content, settings)
             if cover:
-                cover = refresh_qiniu_params_in_content(cover, qiniu_domain, timestamp_key, expire)
+                cover = _refresh_article_qiniu_access(cover, settings)
         
         # 格式化
         category = None

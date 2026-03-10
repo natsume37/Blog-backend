@@ -3,7 +3,12 @@ from qiniu import Auth
 from app.core.config import get_settings, Settings
 from app.core.deps import get_current_admin, get_current_user, get_current_user_optional
 from app.schemas.common import ResponseModel
-from app.utils.qiniu import generate_signed_key, verify_signed_key, generate_qiniu_timestamp_url
+from app.utils.qiniu import (
+    build_qiniu_base_url,
+    generate_signed_key,
+    verify_signed_key,
+    generate_qiniu_timestamp_url,
+)
 import time
 
 router = APIRouter(prefix="/upload", tags=["上传"])
@@ -62,7 +67,7 @@ def get_private_download_url(
             }
         )
 
-    base_url = f"{settings.QINIU_DOMAIN}/{key}"
+    base_url = build_qiniu_base_url(settings.QINIU_DOMAIN, key)
     expire_seconds = settings.QINIU_TIMESTAMP_EXPIRE if settings.is_qiniu_timestamp_enabled else 3600
     
     # 根据配置选择签名方式
@@ -119,7 +124,7 @@ def get_signed_url(
     if not settings.is_qiniu_enabled:
         raise HTTPException(status_code=501, detail="图床服务未配置")
 
-    base_url = f"{settings.QINIU_DOMAIN}/{key}"
+    base_url = build_qiniu_base_url(settings.QINIU_DOMAIN, key)
     expire_seconds = settings.QINIU_TIMESTAMP_EXPIRE if settings.is_qiniu_timestamp_enabled else 3600
     
     # 根据配置选择签名方式
@@ -200,7 +205,7 @@ def get_batch_private_urls(
     if settings.is_qiniu_timestamp_enabled:
         # 使用七牛云时间戳防盗链
         for key in key_list:
-            base_url = f"{settings.QINIU_DOMAIN}/{key}"
+            base_url = build_qiniu_base_url(settings.QINIU_DOMAIN, key)
             private_url = generate_qiniu_timestamp_url(
                 base_url=base_url,
                 key=key,
@@ -219,7 +224,7 @@ def get_batch_private_urls(
         # 使用七牛云私有空间签名（原方式）
         q = Auth(settings.QINIU_ACCESS_KEY, settings.QINIU_SECRET_KEY)
         for key in key_list:
-            base_url = f"{settings.QINIU_DOMAIN}/{key}"
+            base_url = build_qiniu_base_url(settings.QINIU_DOMAIN, key)
             private_url = q.private_download_url(base_url, expires=expire_seconds)
             sign = generate_signed_key(key, timestamp)
             
