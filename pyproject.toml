@@ -21,6 +21,7 @@ dependencies = [
     "apscheduler>=3.10.4",
     "alembic>=1.17.2",
     "qiniu>=7.17.0",
+    "markdown>=3.8",
 ]
 
 [dependency-groups]

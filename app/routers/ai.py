@@ -1,8 +1,4 @@
 import logging
-import json
-import time
-from urllib import request as urllib_request
-from urllib.error import HTTPError, URLError
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
@@ -10,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.deps import get_current_admin
 from app.core.database import get_db
-from app.models.site import SiteInfo
 from app.models.user import User
 from app.schemas.ai import (
     AIDraftRequest,
@@ -19,145 +14,27 @@ from app.schemas.ai import (
     AISummaryResponse,
     AIConfig,
     AIConfigTestResult,
+    MCPToolCallRequest,
+    MCPToolCallResponse,
+    MCPToolContentItem,
+    MCPToolDefinition,
 )
 from app.schemas.common import ResponseModel
 from app.services.ai_article import generate_article_draft, generate_article_summary
+from app.services.mcp_tools import call_public_tool, list_public_tools
+from app.services.plugins import is_plugin_enabled
+from app.services.plugins.builtin.ai_plugin import (
+    AI_PLUGIN_ID,
+    friendly_ai_error,
+    resolve_ai_runtime_settings,
+    save_ai_plugin_settings,
+    test_ai_runtime,
+)
 from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 logger = logging.getLogger(__name__)
-
-
-def _parse_bool(value: str, default: bool) -> bool:
-    value = (value or "").strip().lower()
-    if value in {"true", "1", "yes", "y", "on"}:
-        return True
-    if value in {"false", "0", "no", "n", "off"}:
-        return False
-    return default
-
-
-def _get_ai_settings(db: Session, settings: Settings) -> Settings:
-    key_defaults = {
-        "ai_enabled": "true" if settings.AI_ENABLED else "false",
-        "ai_provider": settings.AI_PROVIDER,
-        "ai_base_url": settings.AI_BASE_URL or "",
-        "ai_api_key": settings.AI_API_KEY or "",
-        "ai_model": settings.AI_MODEL,
-        "ai_timeout_seconds": str(settings.AI_TIMEOUT_SECONDS),
-    }
-    values: dict[str, str] = {}
-    for key, default in key_defaults.items():
-        item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
-        values[key] = item.value if item else default
-
-    timeout = settings.AI_TIMEOUT_SECONDS
-    try:
-        timeout = max(1, int(float(values["ai_timeout_seconds"])))
-    except (TypeError, ValueError):
-        timeout = settings.AI_TIMEOUT_SECONDS
-
-    return settings.model_copy(update={
-        "AI_ENABLED": _parse_bool(values["ai_enabled"], settings.AI_ENABLED),
-        "AI_PROVIDER": values["ai_provider"] or settings.AI_PROVIDER,
-        "AI_BASE_URL": values["ai_base_url"] or None,
-        "AI_API_KEY": values["ai_api_key"] or None,
-        "AI_MODEL": values["ai_model"] or settings.AI_MODEL,
-        "AI_TIMEOUT_SECONDS": timeout,
-    })
-
-
-def _save_ai_settings(db: Session, payload: AIConfig) -> None:
-    config_map = {
-        "ai_enabled": "true" if payload.ai_enabled else "false",
-        "ai_provider": payload.ai_provider.strip(),
-        "ai_base_url": payload.ai_base_url.strip(),
-        "ai_api_key": payload.ai_api_key.strip(),
-        "ai_model": payload.ai_model.strip(),
-        "ai_timeout_seconds": str(payload.ai_timeout_seconds),
-    }
-    for key, value in config_map.items():
-        item = db.query(SiteInfo).filter(SiteInfo.key == key).first()
-        if not item:
-            item = SiteInfo(key=key, value=value)
-            db.add(item)
-        else:
-            item.value = value
-
-
-def _friendly_ai_error(exc: Exception) -> str:
-    if isinstance(exc, HTTPError):
-        return f"AI 接口返回错误（HTTP {exc.code}），请检查 Base URL、模型与 API Key。"
-    if isinstance(exc, URLError):
-        reason = str(getattr(exc, "reason", exc))
-        return f"AI 接口网络异常：{reason}"
-    if isinstance(exc, TimeoutError):
-        return "AI 请求超时，请提高 AI 超时时间或稍后重试。"
-    text = str(exc).strip()
-    if text:
-        return f"AI 生成失败：{text[:180]}"
-    return "AI 生成失败，请稍后重试。"
-
-
-def _test_ai_endpoint(runtime: Settings) -> AIConfigTestResult:
-    start = time.perf_counter()
-    if not runtime.AI_ENABLED:
-        return AIConfigTestResult(
-            ok=False,
-            message="AI 当前未启用（ai_enabled=false）",
-            provider=runtime.AI_PROVIDER,
-            model=runtime.AI_MODEL,
-            latency_ms=0,
-        )
-    if not runtime.AI_BASE_URL:
-        return AIConfigTestResult(
-            ok=False,
-            message="AI_BASE_URL 为空",
-            provider=runtime.AI_PROVIDER,
-            model=runtime.AI_MODEL,
-            latency_ms=0,
-        )
-    if not runtime.AI_API_KEY:
-        return AIConfigTestResult(
-            ok=False,
-            message="AI_API_KEY 为空",
-            provider=runtime.AI_PROVIDER,
-            model=runtime.AI_MODEL,
-            latency_ms=0,
-        )
-
-    payload = {
-        "model": runtime.AI_MODEL,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 8,
-        "temperature": 0,
-    }
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    endpoint = f"{runtime.AI_BASE_URL.rstrip('/')}/chat/completions"
-    req = urllib_request.Request(
-        endpoint,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {runtime.AI_API_KEY}",
-        },
-    )
-
-    with urllib_request.urlopen(req, timeout=runtime.AI_TIMEOUT_SECONDS) as resp:
-        if resp.status < 200 or resp.status >= 300:
-            raise RuntimeError(f"AI 接口状态码异常: {resp.status}")
-        _ = resp.read()
-
-    latency_ms = int((time.perf_counter() - start) * 1000)
-    return AIConfigTestResult(
-        ok=True,
-        message="AI 连通性测试通过",
-        provider=runtime.AI_PROVIDER,
-        model=runtime.AI_MODEL,
-        latency_ms=latency_ms,
-    )
 
 
 @router.get("/config", response_model=ResponseModel[AIConfig])
@@ -166,7 +43,11 @@ def get_ai_config(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    runtime = _get_ai_settings(db, settings)
+    runtime = resolve_ai_runtime_settings(
+        db,
+        settings,
+        plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+    )
     data = AIConfig(
         ai_enabled=runtime.AI_ENABLED,
         ai_provider=runtime.AI_PROVIDER,
@@ -186,9 +67,13 @@ def update_ai_config(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    _save_ai_settings(db, payload)
+    save_ai_plugin_settings(db, payload.model_dump(), settings)
     db.commit()
-    runtime = _get_ai_settings(db, settings)
+    runtime = resolve_ai_runtime_settings(
+        db,
+        settings,
+        plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+    )
     data = AIConfig(
         ai_enabled=runtime.AI_ENABLED,
         ai_provider=runtime.AI_PROVIDER,
@@ -218,7 +103,11 @@ def test_ai_config(
     settings: Settings = Depends(get_settings),
 ):
     try:
-        runtime = _get_ai_settings(db, settings)
+        runtime = resolve_ai_runtime_settings(
+            db,
+            settings,
+            plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+        )
         if payload is not None:
             runtime = runtime.model_copy(update={
                 "AI_ENABLED": payload.ai_enabled,
@@ -228,7 +117,7 @@ def test_ai_config(
                 "AI_MODEL": payload.ai_model.strip() or runtime.AI_MODEL,
                 "AI_TIMEOUT_SECONDS": max(1, int(payload.ai_timeout_seconds)),
             })
-        result = _test_ai_endpoint(runtime)
+        result = AIConfigTestResult(**test_ai_runtime(runtime))
         record_admin_action(
             user=current_user,
             action="ai.config.test",
@@ -240,7 +129,7 @@ def test_ai_config(
         )
         return ResponseModel(code=200 if result.ok else 400, msg=result.message, data=result)
     except Exception as exc:
-        msg = _friendly_ai_error(exc)
+        msg = friendly_ai_error(exc)
         logger.error("Test AI config failed: %s", exc, exc_info=True)
         record_admin_action(
             user=current_user,
@@ -273,14 +162,20 @@ def create_article_draft(
 ):
     """生成文章草稿（管理员）"""
     try:
-        runtime = _get_ai_settings(db, settings)
+        runtime = resolve_ai_runtime_settings(
+            db,
+            settings,
+            plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+        )
+        if not runtime.AI_ENABLED:
+            return ResponseModel(code=400, msg="AI 插件未启用或未完成配置")
         data = generate_article_draft(payload, runtime)
         if not data.get("content_markdown"):
             return ResponseModel(code=502, msg="AI 返回内容为空")
         return ResponseModel(code=200, msg="生成成功", data=AIDraftResponse(**data))
     except Exception as exc:
         logger.error("Generate AI draft failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg=_friendly_ai_error(exc))
+        return ResponseModel(code=500, msg=friendly_ai_error(exc))
 
 
 @router.post("/article-summary", response_model=ResponseModel[AISummaryResponse])
@@ -292,11 +187,79 @@ def create_article_summary(
 ):
     """生成文章摘要（管理员）"""
     try:
-        runtime = _get_ai_settings(db, settings)
+        runtime = resolve_ai_runtime_settings(
+            db,
+            settings,
+            plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+        )
+        if not runtime.AI_ENABLED:
+            return ResponseModel(code=400, msg="AI 插件未启用或未完成配置")
         data = generate_article_summary(payload, runtime)
         if not data.get("summary"):
             return ResponseModel(code=502, msg="AI 返回摘要为空")
         return ResponseModel(code=200, msg="生成成功", data=AISummaryResponse(**data))
     except Exception as exc:
         logger.error("Generate AI summary failed: %s", exc, exc_info=True)
-        return ResponseModel(code=500, msg=_friendly_ai_error(exc))
+        return ResponseModel(code=500, msg=friendly_ai_error(exc))
+
+
+@router.get("/mcp/tools", response_model=ResponseModel[list[MCPToolDefinition]])
+def list_mcp_tools():
+    tools = [
+        MCPToolDefinition(
+            name=tool.name,
+            description=tool.description,
+            inputSchema=tool.input_schema,
+        )
+        for tool in list_public_tools()
+    ]
+    return ResponseModel(code=200, msg="获取成功", data=tools)
+
+
+@router.post("/mcp/call", response_model=ResponseModel[MCPToolCallResponse])
+def call_mcp_tool(
+    payload: MCPToolCallRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        runtime = resolve_ai_runtime_settings(
+            db,
+            settings,
+            plugin_enabled=is_plugin_enabled(db, AI_PLUGIN_ID, settings),
+        )
+        result = call_public_tool(payload.name, payload.arguments or {}, runtime)
+        data = MCPToolCallResponse(
+            name=payload.name,
+            mode=result.get("mode") or ("ai" if runtime.is_ai_configured else "fallback"),
+            provider=runtime.AI_PROVIDER,
+            model=runtime.AI_MODEL,
+            structuredContent=result.get("structuredContent") or {},
+            content=[
+                MCPToolContentItem(
+                    type=item.get("type", "text"),
+                    text=item.get("text", ""),
+                )
+                for item in (result.get("content") or [])
+                if isinstance(item, dict)
+            ],
+            isError=bool(result.get("isError", False)),
+        )
+        return ResponseModel(code=200, msg="工具调用成功", data=data)
+    except KeyError:
+        return ResponseModel(code=404, msg=f"工具不存在: {payload.name}")
+    except Exception as exc:
+        logger.error("Call MCP tool failed: %s", exc, exc_info=True)
+        return ResponseModel(
+            code=500,
+            msg=friendly_ai_error(exc),
+            data=MCPToolCallResponse(
+                name=payload.name,
+                mode="error",
+                provider=settings.AI_PROVIDER,
+                model=settings.AI_MODEL,
+                structuredContent={},
+                content=[MCPToolContentItem(type="text", text=friendly_ai_error(exc))],
+                isError=True,
+            ),
+        )
