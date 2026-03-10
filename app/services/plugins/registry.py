@@ -125,13 +125,74 @@ def _serialize_plugin_spec(spec: PluginSpec, record: PluginInstall | None) -> di
         "plugin_id": spec.plugin_id,
         "name": spec.name,
         "version": spec.version,
+        "latest_version": spec.version,
+        "installed_version": spec.version if record and record.is_installed else "",
         "description": spec.description,
+        "summary": spec.description,
         "category": spec.category,
         "source": spec.source,
+        "icon": spec.icon,
+        "author": spec.author,
+        "homepage": spec.homepage,
+        "docs_url": spec.docs_url,
+        "repo_url": spec.repository_url,
+        "support_url": spec.support_url,
+        "issues_url": spec.issues_url,
+        "license": spec.license,
+        "pricing": "free",
+        "published_at": "",
+        "manifest_url": "",
+        "changelog_url": "",
+        "source_repo": spec.repository_url,
+        "keywords": list(spec.keywords),
+        "tags": list(spec.tags),
+        "features": list(spec.features),
+        "capabilities": list(spec.capabilities),
+        "permissions": list(spec.permissions),
+        "builtin": True,
+        "marketplace": False,
+        "official": spec.source == "official",
+        "verified": spec.verified or spec.source == "official",
+        "featured": spec.featured,
+        "installable": True,
+        "activatable": True,
         "installed": bool(record.is_installed) if record else False,
         "enabled": bool(record.is_enabled) if record else False,
+        "status": (
+            "enabled"
+            if record and record.is_installed and record.is_enabled
+            else "installed"
+            if record and record.is_installed
+            else "available"
+        ),
         "auto_install": spec.auto_install,
+        "compatibility": {
+            "backend": "fastapi",
+            "frontend": "vue",
+            "min_app_version": spec.min_app_version,
+            "max_app_version": spec.max_app_version,
+        },
+        "delivery": {
+            "type": "builtin",
+            "entry_mode": "local",
+            "install_strategy": spec.install_strategy,
+            "runtime_type": spec.runtime_type,
+            "entry_url": "",
+        },
+        "publisher": {
+            "name": spec.publisher or spec.author,
+            "url": spec.homepage,
+            "verified": spec.verified or spec.source == "official",
+        },
+        "screenshots": [{"label": "", "url": item} for item in spec.screenshots],
         "settings_schema": [asdict(item) for item in spec.settings_schema],
-        "admin_pages": [asdict(item) for item in spec.admin_pages],
+        "admin_pages": [
+            {
+                **asdict(item),
+                "render_mode": "local",
+                "entry_url": "",
+            }
+            for item in spec.admin_pages
+        ],
         "actions": [asdict(item) for item in spec.actions],
     }

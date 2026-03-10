@@ -19,7 +19,7 @@ from app.services.plugins import (
     get_plugin_spec,
     get_plugin_with_state,
     install_plugin,
-    list_plugins_with_state,
+    list_market_plugins,
     set_plugin_enabled,
 )
 from app.services.plugins.builtin.wechat_official import _friendly_wechat_error
@@ -47,7 +47,7 @@ def get_plugin_market(
     _: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings),
 ):
-    return ResponseModel(code=200, msg="获取成功", data=list_plugins_with_state(db, settings))
+    return ResponseModel(code=200, msg="获取成功", data=list_market_plugins(db, settings))
 
 
 @router.get("", response_model=ResponseModel[list[PluginItemResponse]])
@@ -56,7 +56,7 @@ def get_admin_plugins(
     _: User = Depends(get_current_admin),
     settings: Settings = Depends(get_settings),
 ):
-    return ResponseModel(code=200, msg="获取成功", data=list_plugins_with_state(db, settings))
+    return ResponseModel(code=200, msg="获取成功", data=list_market_plugins(db, settings))
 
 
 @router.post("/{plugin_id}/install", response_model=ResponseModel[PluginItemResponse])

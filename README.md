@@ -61,6 +61,7 @@ cp .env.prod.example .env.prod
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
+- `PLUGIN_MARKET_INDEX_URL`（可选，默认指向 `natsume37/Blog-plugin-market`）
 
 ### 6. 创建管理员账号
 
@@ -100,6 +101,19 @@ ENVIRONMENT=production uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
 
 - Swagger UI: http://localhost:8090/docs
 - ReDoc: http://localhost:8090/redoc
+
+## 插件市场
+
+后端会优先读取 `PLUGIN_MARKET_INDEX_URL` 指向的市场索引；未配置时默认读取 GitHub 仓库 `natsume37/Blog-plugin-market` 的 `marketplace/index.json`。
+
+常用配置：
+
+- `PLUGIN_MARKET_ENABLED`
+- `PLUGIN_MARKET_INDEX_URL`
+- `PLUGIN_MARKET_GITHUB_OWNER`
+- `PLUGIN_MARKET_GITHUB_REPO`
+- `PLUGIN_MARKET_GITHUB_REF`
+- `PLUGIN_MARKET_INDEX_PATH`
 
 ## 数据库迁移（Alembic）
 

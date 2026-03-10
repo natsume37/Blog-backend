@@ -62,5 +62,26 @@ class PluginSpec:
     get_settings: PluginSettingsLoader
     save_settings: PluginSettingsSaver
     call_action: PluginActionHandler
+    icon: str = "Grid"
+    author: str = ""
+    publisher: str = ""
+    homepage: str = ""
+    docs_url: str = ""
+    repository_url: str = ""
+    support_url: str = ""
+    issues_url: str = ""
+    license: str = ""
+    verified: bool = False
+    featured: bool = False
+    install_strategy: str = "builtin"
+    runtime_type: str = "builtin"
+    min_app_version: str = "1.0.0"
+    max_app_version: str = ""
+    features: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+    screenshots: list[str] = field(default_factory=list)
     auto_install: bool = False
     default_enabled: PluginEnabledDefault | None = None

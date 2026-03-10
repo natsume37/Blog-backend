@@ -103,6 +103,18 @@ class Settings(BaseSettings):
     AI_TIMEOUT_SECONDS: int = Field(default=30, description='AI 接口超时时间（秒）')
 
     # ===========================
+    # 插件市场配置 (Plugin Marketplace)
+    # ===========================
+    PLUGIN_MARKET_ENABLED: bool = Field(default=True, description='是否启用远程插件市场')
+    PLUGIN_MARKET_INDEX_URL: str | None = Field(default=None, description='插件市场索引地址，支持 file:// 与 https://')
+    PLUGIN_MARKET_GITHUB_OWNER: str = Field(default='natsume37', description='插件市场 GitHub Owner')
+    PLUGIN_MARKET_GITHUB_REPO: str = Field(default='Blog-plugin-market', description='插件市场 GitHub Repo')
+    PLUGIN_MARKET_GITHUB_REF: str = Field(default='main', description='插件市场 GitHub 分支或标签')
+    PLUGIN_MARKET_INDEX_PATH: str = Field(default='marketplace/index.json', description='插件市场索引在仓库中的路径')
+    PLUGIN_MARKET_TIMEOUT_SECONDS: int = Field(default=3, description='插件市场请求超时时间（秒）')
+    PLUGIN_MARKET_CACHE_TTL_SECONDS: int = Field(default=300, description='插件市场索引缓存时间（秒）')
+
+    # ===========================
     # IP 地理位置解析配置 (GeoIP)
     # ===========================
     GEOIP_ENABLED: bool = Field(default=False, description='是否启用公网IP地理位置解析')
@@ -152,6 +164,26 @@ class Settings(BaseSettings):
     def is_ai_configured(self) -> bool:
         """检查 AI 能力是否已配置"""
         return bool(self.AI_ENABLED and self.AI_BASE_URL and self.AI_API_KEY and self.AI_MODEL)
+
+    @property
+    def plugin_market_raw_base_url(self) -> str:
+        return (
+            f"https://raw.githubusercontent.com/"
+            f"{self.PLUGIN_MARKET_GITHUB_OWNER}/"
+            f"{self.PLUGIN_MARKET_GITHUB_REPO}/"
+            f"{self.PLUGIN_MARKET_GITHUB_REF}"
+        )
+
+    @property
+    def plugin_market_index_url(self) -> str:
+        """插件市场索引地址"""
+        if self.PLUGIN_MARKET_INDEX_URL:
+            return self.PLUGIN_MARKET_INDEX_URL
+        owner = self.PLUGIN_MARKET_GITHUB_OWNER.strip()
+        repo = self.PLUGIN_MARKET_GITHUB_REPO.strip()
+        branch = self.PLUGIN_MARKET_GITHUB_REF.strip() or "main"
+        path = self.PLUGIN_MARKET_INDEX_PATH.strip().lstrip("/")
+        return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
 
     def validate_runtime_security(self) -> None:
         """运行时安全校验（在生产环境强制关键配置）"""

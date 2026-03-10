@@ -61,6 +61,7 @@ Important production fields:
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
+- `PLUGIN_MARKET_INDEX_URL` (optional, defaults to `natsume37/Blog-plugin-market`)
 
 ### 6. Create Admin Account
 
@@ -93,6 +94,19 @@ Or run directly:
 ENVIRONMENT=development uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8090
 ENVIRONMENT=production uv run uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
+
+## Plugin Marketplace
+
+The backend reads the marketplace index from `PLUGIN_MARKET_INDEX_URL` when provided. Otherwise it defaults to `marketplace/index.json` in the GitHub repo `natsume37/Blog-plugin-market`.
+
+Common settings:
+
+- `PLUGIN_MARKET_ENABLED`
+- `PLUGIN_MARKET_INDEX_URL`
+- `PLUGIN_MARKET_GITHUB_OWNER`
+- `PLUGIN_MARKET_GITHUB_REPO`
+- `PLUGIN_MARKET_GITHUB_REF`
+- `PLUGIN_MARKET_INDEX_PATH`
 
 ### 7. systemd (production)
 
