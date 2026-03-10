@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from typing import Any
+from urllib import parse as urlparse
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
@@ -20,12 +21,15 @@ _MARKET_CACHE: dict[str, Any] = {
 }
 
 
-def _build_market_url(settings: Settings, path: str) -> str:
+def _build_market_url(settings: Settings, path: str, *, base_url: str = "") -> str:
     target = str(path or "").strip()
     if not target:
         return ""
     if target.startswith(("https://", "http://", "file://")):
         return target
+    if base_url:
+        parent = base_url if base_url.endswith("/") else f"{base_url.rsplit('/', 1)[0]}/"
+        return urlparse.urljoin(parent, target.lstrip("/"))
     normalized = target.lstrip("/")
     return f"{settings.plugin_market_raw_base_url}/{normalized}"
 
@@ -61,6 +65,9 @@ def _normalize_manifest(
     manifest: dict[str, Any],
     index_entry: dict[str, Any],
     settings: Settings,
+    *,
+    index_url: str,
+    manifest_url: str,
 ) -> dict[str, Any] | None:
     plugin_id = str(manifest.get("plugin_id") or index_entry.get("plugin_id") or "").strip()
     if not plugin_id:
@@ -74,7 +81,7 @@ def _normalize_manifest(
     screenshots: list[dict[str, str]] = []
     for item in screenshots_raw:
         if isinstance(item, dict):
-            url = _build_market_url(settings, str(item.get("url") or ""))
+            url = _build_market_url(settings, str(item.get("url") or ""), base_url=manifest_url)
             if url:
                 screenshots.append({
                     "label": str(item.get("label") or "").strip(),
@@ -92,18 +99,26 @@ def _normalize_manifest(
         "source": str(manifest.get("source") or "market").strip(),
         "icon": str(manifest.get("icon") or "Grid").strip() or "Grid",
         "author": str(manifest.get("author") or "").strip(),
-        "homepage": _build_market_url(settings, str(manifest.get("homepage") or "")),
-        "docs_url": _build_market_url(settings, str(manifest.get("docs_url") or "")),
-        "repo_url": _build_market_url(settings, str(manifest.get("repo_url") or "")),
-        "support_url": _build_market_url(settings, str(manifest.get("support_url") or "")),
-        "issues_url": _build_market_url(settings, str(manifest.get("issues_url") or "")),
+        "homepage": _build_market_url(settings, str(manifest.get("homepage") or ""), base_url=manifest_url),
+        "docs_url": _build_market_url(settings, str(manifest.get("docs_url") or ""), base_url=manifest_url),
+        "repo_url": _build_market_url(settings, str(manifest.get("repo_url") or ""), base_url=manifest_url),
+        "support_url": _build_market_url(settings, str(manifest.get("support_url") or ""), base_url=manifest_url),
+        "issues_url": _build_market_url(settings, str(manifest.get("issues_url") or ""), base_url=manifest_url),
         "license": str(manifest.get("license") or "").strip(),
         "pricing": str(manifest.get("pricing") or "free").strip() or "free",
         "published_at": str(manifest.get("published_at") or "").strip(),
-        "manifest_url": _build_market_url(settings, str(index_entry.get("manifest_path") or manifest.get("manifest_url") or "")),
-        "readme_url": _build_market_url(settings, str(index_entry.get("readme_path") or manifest.get("readme_url") or "")),
-        "changelog_url": _build_market_url(settings, str(index_entry.get("changelog_path") or manifest.get("changelog_url") or "")),
-        "source_repo": str(manifest.get("source_repo") or "").strip(),
+        "manifest_url": manifest_url,
+        "readme_url": _build_market_url(
+            settings,
+            str(index_entry.get("readme_path") or manifest.get("readme_url") or ""),
+            base_url=index_url,
+        ),
+        "changelog_url": _build_market_url(
+            settings,
+            str(index_entry.get("changelog_path") or manifest.get("changelog_url") or ""),
+            base_url=index_url,
+        ),
+        "source_repo": _build_market_url(settings, str(manifest.get("source_repo") or ""), base_url=manifest_url),
         "keywords": _normalize_list(manifest.get("keywords")),
         "tags": _normalize_list(manifest.get("tags")),
         "features": _normalize_list(manifest.get("features")),
@@ -116,7 +131,11 @@ def _normalize_manifest(
         "featured": bool(manifest.get("featured", False)),
         "publisher": {
             "name": str(publisher.get("name") or manifest.get("publisher_name") or "").strip(),
-            "url": _build_market_url(settings, str(publisher.get("url") or manifest.get("publisher_url") or "")),
+            "url": _build_market_url(
+                settings,
+                str(publisher.get("url") or manifest.get("publisher_url") or ""),
+                base_url=manifest_url,
+            ),
             "verified": bool(publisher.get("verified", False) or manifest.get("verified", False)),
         },
         "compatibility": {
@@ -130,7 +149,7 @@ def _normalize_manifest(
             "entry_mode": str(delivery.get("entry_mode") or "local").strip() or "local",
             "install_strategy": str(delivery.get("install_strategy") or "catalog").strip() or "catalog",
             "runtime_type": str(delivery.get("runtime_type") or "catalog").strip() or "catalog",
-            "entry_url": _build_market_url(settings, str(delivery.get("entry_url") or "")),
+            "entry_url": _build_market_url(settings, str(delivery.get("entry_url") or ""), base_url=manifest_url),
         },
         "screenshots": screenshots,
         "settings_schema": manifest.get("settings_schema") if isinstance(manifest.get("settings_schema"), list) else [],
@@ -160,12 +179,19 @@ def load_market_catalog(settings: Settings) -> list[dict[str, Any]]:
                 continue
             manifest_path = str(raw_entry.get("manifest_path") or "").strip()
             manifest_payload = raw_entry
+            manifest_url = _build_market_url(settings, manifest_path, base_url=index_url)
             if manifest_path:
                 manifest_payload = _fetch_json(
-                    _build_market_url(settings, manifest_path),
+                    manifest_url,
                     settings.PLUGIN_MARKET_TIMEOUT_SECONDS,
                 )
-            item = _normalize_manifest(manifest_payload, raw_entry, settings)
+            item = _normalize_manifest(
+                manifest_payload,
+                raw_entry,
+                settings,
+                index_url=index_url,
+                manifest_url=manifest_url,
+            )
             if item:
                 entries.append(item)
 
