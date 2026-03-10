@@ -18,7 +18,7 @@ from app.schemas.resource import (
 from app.schemas.common import ResponseModel, PagedData
 from app.core.cache import RedisClient
 from app.core.config import get_settings, Settings
-from qiniu import Auth, BucketManager
+from app.services.resource_qiniu import delete_qiniu_resources, sync_qiniu_resources
 from app.utils.audit import record_admin_action
 
 router = APIRouter(prefix="/resources", tags=["资源管理"])
@@ -33,24 +33,6 @@ def _normalize_type(media_type: Optional[str]) -> Optional[str]:
     if m in {"video", "audio", "other"}:
         return m
     return m
-
-
-def _guess_media_type(key: str, mime_type: Optional[str]) -> str:
-    if mime_type:
-        if mime_type.startswith("image/"):
-            return "img"
-        if mime_type.startswith("video/"):
-            return "video"
-        if mime_type.startswith("audio/"):
-            return "audio"
-    lower_key = (key or "").lower()
-    if lower_key.startswith("img/"):
-        return "img"
-    if lower_key.startswith("video/"):
-        return "video"
-    if lower_key.startswith("audio/"):
-        return "audio"
-    return "other"
 
 
 def _find_referenced_articles(db: Session, key: str, url: str):
@@ -181,20 +163,7 @@ def delete_resource(
         )
     
     # 1. 删除七牛云文件
-    try:
-        if settings.is_qiniu_enabled:
-            q = Auth(settings.QINIU_ACCESS_KEY, settings.QINIU_SECRET_KEY)
-            bucket = BucketManager(q)
-            ret, info = bucket.delete(settings.QINIU_BUCKET, resource.key)
-            # 即使七牛云返回错误（例如文件不存在），只要不是网络错误，我们都继续删除数据库记录
-            if info.status_code != 200 and info.status_code != 612: # 612: file not found
-                 # 记录日志但未必阻断
-                 print(f"Failed to delete from Qiniu: {info}")
-        else:
-            print("Skipping Qiniu deletion (Configuration missing)")
-    except Exception as e:
-        print(f"Qiniu delete error: {e}")
-        # 可选：如果硬性要求一致性，这里可以抛出异常
+    delete_qiniu_resources([resource.key], settings)
 
     # 2. 删除数据库记录
     target_key = resource.key
@@ -233,15 +202,9 @@ def batch_delete_resource(
     if not resources:
         return ResponseModel(code=404, msg="资源不存在")
 
-    q = None
-    bucket = None
-    if settings.is_qiniu_enabled:
-        q = Auth(settings.QINIU_ACCESS_KEY, settings.QINIU_SECRET_KEY)
-        bucket = BucketManager(q)
-
     deleted = 0
     skipped_refs: list[dict] = []
-    qiniu_failed = 0
+    pending_qiniu_keys: list[str] = []
     for resource in resources:
         refs = _find_referenced_articles(db, resource.key, resource.url)
         if refs and not payload.force:
@@ -252,17 +215,11 @@ def batch_delete_resource(
             })
             continue
 
-        if bucket:
-            try:
-                _ret, info = bucket.delete(settings.QINIU_BUCKET, resource.key)
-                if info.status_code not in (200, 612):
-                    qiniu_failed += 1
-            except Exception:
-                qiniu_failed += 1
-
+        pending_qiniu_keys.append(resource.key)
         db.delete(resource)
         deleted += 1
 
+    qiniu_failed = delete_qiniu_resources(pending_qiniu_keys, settings)
     db.commit()
 
     redis_client = RedisClient()
@@ -307,70 +264,19 @@ def sync_resources_from_qiniu(
     if not settings.is_qiniu_enabled:
         return ResponseModel(code=400, msg="七牛云未配置，无法同步")
 
-    limit = max(1, min(int(payload.limit or 1000), 3000))
     prefix = (payload.prefix or "").strip()
-
-    q = Auth(settings.QINIU_ACCESS_KEY, settings.QINIU_SECRET_KEY)
-    bucket = BucketManager(q)
-
-    marker = ""
-    created = 0
-    updated = 0
-    scanned = 0
-    domain = settings.QINIU_DOMAIN.rstrip("/")
-
-    while True:
-        ret, eof, info = bucket.list(settings.QINIU_BUCKET, prefix=prefix or None, marker=marker, limit=min(1000, limit - scanned))
-        if info.status_code != 200:
-            return ResponseModel(code=500, msg=f"同步失败，七牛返回状态码: {info.status_code}")
-
-        items = ret.get("items", []) if ret else []
-        marker = ret.get("marker", "") if ret else ""
-        for item in items:
-            key = item.get("key", "")
-            if not key:
-                continue
-            scanned += 1
-            if scanned > limit:
-                break
-
-            fsize = int(item.get("fsize", 0) or 0)
-            mime_type = item.get("mimeType") or None
-            media_type = _guess_media_type(key, mime_type)
-            base_url = f"{domain}/{key}"
-
-            existing = db.query(Resource).filter(Resource.key == key).first()
-            if existing:
-                changed = False
-                if existing.size != fsize:
-                    existing.size = fsize
-                    changed = True
-                if existing.mime_type != mime_type:
-                    existing.mime_type = mime_type
-                    changed = True
-                if existing.url != base_url:
-                    existing.url = base_url
-                    changed = True
-                if existing.media_type != media_type:
-                    existing.media_type = media_type
-                    changed = True
-                if changed:
-                    updated += 1
-            else:
-                resource = Resource(
-                    filename=key.split("/")[-1] or key,
-                    key=key,
-                    url=base_url,
-                    media_type=media_type,
-                    mime_type=mime_type,
-                    size=fsize,
-                    user_id=current_user.id,
-                )
-                db.add(resource)
-                created += 1
-
-        if scanned >= limit or eof or not marker:
-            break
+    limit = max(1, min(int(payload.limit or 1000), 3000))
+    try:
+        sync_stats = sync_qiniu_resources(
+            db,
+            settings,
+            prefix=prefix,
+            limit=limit,
+            user_id=current_user.id,
+        )
+    except RuntimeError as exc:
+        db.rollback()
+        return ResponseModel(code=500, msg=str(exc))
 
     db.commit()
 
@@ -382,15 +288,25 @@ def sync_resources_from_qiniu(
         action="resource.sync_qiniu",
         target_type="resource",
         target_id=prefix or "all",
-        description=f"七牛云资源同步，扫描 {scanned}，新增 {created}，更新 {updated}",
+        description=f"七牛云资源同步，扫描 {sync_stats.scanned}，新增 {sync_stats.created}，更新 {sync_stats.updated}",
         request=request,
-        extra={"prefix": prefix, "limit": limit, "scanned": scanned, "created": created, "updated": updated},
+        extra={
+            "prefix": prefix,
+            "limit": limit,
+            "scanned": sync_stats.scanned,
+            "created": sync_stats.created,
+            "updated": sync_stats.updated,
+        },
     )
 
     return ResponseModel(
         code=200,
-        msg=f"同步完成：扫描 {scanned}，新增 {created}，更新 {updated}",
-        data={"scanned": scanned, "created": created, "updated": updated},
+        msg=f"同步完成：扫描 {sync_stats.scanned}，新增 {sync_stats.created}，更新 {sync_stats.updated}",
+        data={
+            "scanned": sync_stats.scanned,
+            "created": sync_stats.created,
+            "updated": sync_stats.updated,
+        },
     )
 
 

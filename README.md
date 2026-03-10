@@ -16,22 +16,31 @@ FastAPI 博客后端服务。
 ### 1. 安装 uv（若未安装）
 
 ```bash
-pip install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. 创建虚拟环境并安装依赖
+### 2. 安装并固定 Python 版本
+
+```bash
+uv python install 3.11
+uv python pin 3.11
+```
+
+### 3. 创建虚拟环境并安装依赖
 
 ```bash
 uv sync
 ```
 
-### 3. 创建 MySQL 数据库
+`uv sync` 会按 `.python-version` 创建本地 `.venv`，并优先使用 `uv.lock` 还原环境。
+
+### 4. 创建 MySQL 数据库
 
 ```sql
 CREATE DATABASE blog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 4. 配置环境变量
+### 5. 配置环境变量
 
 项目根据 `ENVIRONMENT` 读取配置文件：
 
@@ -53,7 +62,7 @@ cp .env.prod.example .env.prod
 - `CORS_ORIGINS`
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
 
-### 5. 创建管理员账号
+### 6. 创建管理员账号
 
 ```bash
 # 使用默认账号（admin / admin123）
@@ -66,7 +75,7 @@ uv run python scripts/create_admin.py -i
 uv run python scripts/create_admin.py -u myusername -e myemail@example.com -p mypassword -n "My Nickname"
 ```
 
-### 6. 启动服务
+### 7. 启动服务
 
 推荐使用脚本：
 

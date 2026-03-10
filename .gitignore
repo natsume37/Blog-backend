@@ -13,6 +13,3 @@ __pycache__/
 
 # Logs
 *.log
-
-# uv
-uv.lock

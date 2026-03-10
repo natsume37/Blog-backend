@@ -16,23 +16,31 @@ FastAPI backend for the Miyazaki Style Blog.
 ### 1. Install uv (if not installed)
 
 ```bash
-pip install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Create virtual environment and install dependencies
+### 2. Install and pin Python
 
 ```bash
-cd backend
+uv python install 3.11
+uv python pin 3.11
+```
+
+### 3. Create virtual environment and install dependencies
+
+```bash
 uv sync
 ```
 
-### 3. Create MySQL database
+`uv sync` will create the local `.venv` from `.python-version` and restore dependencies from `uv.lock` when available.
+
+### 4. Create MySQL database
 
 ```sql
 CREATE DATABASE blog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 4. Configure environment (uv + env files)
+### 5. Configure environment (uv + env files)
 
 This project reads config by `ENVIRONMENT`:
 
@@ -54,7 +62,7 @@ Important production fields:
 - `CORS_ORIGINS`
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
 
-### 5. Create Admin Account
+### 6. Create Admin Account
 
 ```bash
 # Use default admin (admin / admin123)
@@ -67,7 +75,7 @@ uv run python scripts/create_admin.py -i
 uv run python scripts/create_admin.py -u myusername -e myemail@example.com -p mypassword -n "My Nickname"
 ```
 
-### 6. Run with uv
+### 7. Run with uv
 
 Use the helper script (recommended):
 

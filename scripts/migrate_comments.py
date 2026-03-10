@@ -2,8 +2,7 @@
 评论表迁移脚本 - 添加 content_type 和 content_id 字段，移除 article_id
 
 运行方式:
-cd backend
-python -m scripts.migrate_comments
+uv run python -m scripts.migrate_comments
 """
 import sys
 import os
