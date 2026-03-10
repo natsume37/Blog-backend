@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     PLUGIN_MARKET_GITHUB_REPO: str = Field(default='Blog-plugin-market', description='插件市场 GitHub Repo')
     PLUGIN_MARKET_GITHUB_REF: str = Field(default='main', description='插件市场 GitHub 分支或标签')
     PLUGIN_MARKET_INDEX_PATH: str = Field(default='marketplace/index.json', description='插件市场索引在仓库中的路径')
+    PLUGIN_MARKET_FALLBACK_PATH: str = Field(
+        default='app/data/plugin_market_index.json',
+        description='内置插件市场快照路径，用于远程市场不可达时降级',
+    )
     PLUGIN_MARKET_TIMEOUT_SECONDS: int = Field(default=3, description='插件市场请求超时时间（秒）')
     PLUGIN_MARKET_CACHE_TTL_SECONDS: int = Field(default=300, description='插件市场索引缓存时间（秒）')
 
@@ -184,6 +188,12 @@ class Settings(BaseSettings):
         branch = self.PLUGIN_MARKET_GITHUB_REF.strip() or "main"
         path = self.PLUGIN_MARKET_INDEX_PATH.strip().lstrip("/")
         return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+
+    @property
+    def plugin_market_fallback_index_url(self) -> str:
+        """内置插件市场快照地址"""
+        path = self.PLUGIN_MARKET_FALLBACK_PATH.strip().lstrip("/")
+        return (self.BASE_DIR / path).resolve().as_uri()
 
     def validate_runtime_security(self) -> None:
         """运行时安全校验（在生产环境强制关键配置）"""

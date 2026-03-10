@@ -158,6 +158,36 @@ def _normalize_manifest(
     }
 
 
+def _load_market_catalog_from_index(index_url: str, settings: Settings) -> list[dict[str, Any]]:
+    index_payload = _fetch_json(index_url, settings.PLUGIN_MARKET_TIMEOUT_SECONDS)
+    raw_entries = index_payload.get("plugins")
+    if not isinstance(raw_entries, list):
+        raise RuntimeError("插件市场索引缺少 plugins 数组")
+
+    entries: list[dict[str, Any]] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        manifest_path = str(raw_entry.get("manifest_path") or "").strip()
+        manifest_payload = raw_entry
+        manifest_url = _build_market_url(settings, manifest_path, base_url=index_url)
+        if manifest_path:
+            manifest_payload = _fetch_json(
+                manifest_url,
+                settings.PLUGIN_MARKET_TIMEOUT_SECONDS,
+            )
+        item = _normalize_manifest(
+            manifest_payload,
+            raw_entry,
+            settings,
+            index_url=index_url,
+            manifest_url=manifest_url,
+        )
+        if item:
+            entries.append(item)
+    return entries
+
+
 def load_market_catalog(settings: Settings) -> list[dict[str, Any]]:
     if not settings.PLUGIN_MARKET_ENABLED:
         return []
@@ -166,44 +196,30 @@ def load_market_catalog(settings: Settings) -> list[dict[str, Any]]:
     if _MARKET_CACHE["entries"] and now < float(_MARKET_CACHE["expires_at"]):
         return list(_MARKET_CACHE["entries"])
 
-    index_url = settings.plugin_market_index_url
-    try:
-        index_payload = _fetch_json(index_url, settings.PLUGIN_MARKET_TIMEOUT_SECONDS)
-        raw_entries = index_payload.get("plugins")
-        if not isinstance(raw_entries, list):
-            raise RuntimeError("插件市场索引缺少 plugins 数组")
+    errors: list[str] = []
+    index_urls = [
+        settings.plugin_market_index_url,
+        settings.plugin_market_fallback_index_url,
+    ]
 
-        entries: list[dict[str, Any]] = []
-        for raw_entry in raw_entries:
-            if not isinstance(raw_entry, dict):
-                continue
-            manifest_path = str(raw_entry.get("manifest_path") or "").strip()
-            manifest_payload = raw_entry
-            manifest_url = _build_market_url(settings, manifest_path, base_url=index_url)
-            if manifest_path:
-                manifest_payload = _fetch_json(
-                    manifest_url,
-                    settings.PLUGIN_MARKET_TIMEOUT_SECONDS,
-                )
-            item = _normalize_manifest(
-                manifest_payload,
-                raw_entry,
-                settings,
-                index_url=index_url,
-                manifest_url=manifest_url,
-            )
-            if item:
-                entries.append(item)
+    for index_url in dict.fromkeys(index_urls):
+        try:
+            entries = _load_market_catalog_from_index(index_url, settings)
+            _MARKET_CACHE["entries"] = entries
+            _MARKET_CACHE["expires_at"] = now + max(30, int(settings.PLUGIN_MARKET_CACHE_TTL_SECONDS))
+            if index_url == settings.plugin_market_fallback_index_url:
+                logger.warning("Plugin marketplace is using embedded fallback snapshot: %s", index_url)
+            return list(entries)
+        except (HTTPError, URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as exc:
+            errors.append(f"{index_url}: {exc}")
+            logger.warning("Load plugin marketplace failed from %s: %s", index_url, exc)
 
-        _MARKET_CACHE["entries"] = entries
-        _MARKET_CACHE["expires_at"] = now + max(30, int(settings.PLUGIN_MARKET_CACHE_TTL_SECONDS))
-        return list(entries)
-    except (HTTPError, URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as exc:
-        if _MARKET_CACHE["entries"]:
-            logger.warning("Load plugin marketplace failed, using stale cache: %s", exc)
-            return list(_MARKET_CACHE["entries"])
-        logger.warning("Load plugin marketplace failed, using builtin fallback: %s", exc)
-        return []
+    if _MARKET_CACHE["entries"]:
+        logger.warning("Load plugin marketplace failed from all sources, using stale cache")
+        return list(_MARKET_CACHE["entries"])
+
+    logger.warning("Load plugin marketplace failed from all sources, using builtin fallback only: %s", " | ".join(errors))
+    return []
 
 
 def _merge_market_with_local(
@@ -280,32 +296,36 @@ def _merge_market_with_local(
 
 def list_market_plugins(db: Session, settings: Settings) -> list[dict[str, Any]]:
     local_items = list_plugins_with_state(db, settings)
-    local_map = {item["plugin_id"]: item for item in local_items}
-    records = {item.plugin_id: item for item in db.query(PluginInstall).all()}
+    try:
+        local_map = {item["plugin_id"]: item for item in local_items}
+        records = {item.plugin_id: item for item in db.query(PluginInstall).all()}
 
-    market_items = load_market_catalog(settings)
-    if not market_items:
+        market_items = load_market_catalog(settings)
+        if not market_items:
+            return local_items
+
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for market_item in market_items:
+            plugin_id = str(market_item.get("plugin_id") or "").strip()
+            if not plugin_id:
+                continue
+            seen.add(plugin_id)
+            merged.append(_merge_market_with_local(market_item, local_map.get(plugin_id), records.get(plugin_id)))
+
+        for plugin_id, local_item in local_map.items():
+            if plugin_id in seen:
+                continue
+            merged.append(_merge_market_with_local(local_item, local_item, records.get(plugin_id)))
+
+        return sorted(
+            merged,
+            key=lambda item: (
+                0 if item.get("featured") else 1,
+                0 if item.get("verified") else 1,
+                str(item.get("name") or "").lower(),
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Build plugin marketplace response failed, fallback to local registry: %s", exc)
         return local_items
-
-    merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for market_item in market_items:
-        plugin_id = str(market_item.get("plugin_id") or "").strip()
-        if not plugin_id:
-            continue
-        seen.add(plugin_id)
-        merged.append(_merge_market_with_local(market_item, local_map.get(plugin_id), records.get(plugin_id)))
-
-    for plugin_id, local_item in local_map.items():
-        if plugin_id in seen:
-            continue
-        merged.append(_merge_market_with_local(local_item, local_item, records.get(plugin_id)))
-
-    return sorted(
-        merged,
-        key=lambda item: (
-            0 if item.get("featured") else 1,
-            0 if item.get("verified") else 1,
-            str(item.get("name") or "").lower(),
-        ),
-    )
