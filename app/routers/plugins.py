@@ -201,7 +201,10 @@ def call_plugin_action(
     if action not in {"test_connection", "test_image_connection"} and not item["enabled"]:
         return ResponseModel(code=400, msg="请先启用插件，再执行该动作")
     try:
-        result = spec.call_action(action, payload.payload or {}, db, settings)
+        action_payload = dict(payload.payload or {})
+        action_payload.setdefault("_actor_id", current_user.id)
+        result = spec.call_action(action, action_payload, db, settings)
+        db.commit()
         record_admin_action(
             user=current_user,
             action=f"plugin.action.{action}",
