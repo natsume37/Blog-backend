@@ -6,7 +6,7 @@ on:
 
 env:
   DEPLOY_SSH_CONNECT_TIMEOUT: 30s
-  DEPLOY_COMMAND_TIMEOUT: 10m
+  DEPLOY_COMMAND_TIMEOUT: 25m
 
 jobs:
   deploy:
@@ -92,13 +92,13 @@ jobs:
         fi
 
         # 4. 同步依赖
-        # uv sync 会自动读取 pyproject.toml，创建/更新 .venv
+        # 生产环境仅同步运行依赖，避免 dev 依赖拖慢部署。
         echo "Syncing dependencies..."
-        uv sync --frozen
+        uv sync --frozen --no-dev
 
-        # 5. 执行数据库迁移 (设置 ENVIRONMENT 确保使用生产配置)
+        # 5. 执行数据库迁移 (复用已同步的环境，不再触发额外 sync)
         echo "Running database migrations..."
-        ENVIRONMENT=production uv run alembic upgrade head
+        ENVIRONMENT=production uv run --frozen --no-sync --no-dev alembic upgrade head
 
         # 6. 重启服务
         sudo systemctl restart fastapi-blog.service
