@@ -29,6 +29,7 @@ from app.utils.qiniu import normalize_remote_url
 
 WECHAT_PLUGIN_ID = "wechat-official-account"
 _IMG_TAG_RE = re.compile(r'(<img\b[^>]*?\ssrc=")([^"]+)(")', re.IGNORECASE)
+_WECHAT_API_ERROR_RE = re.compile(r"WeChat API error\s+(-?\d+):\s*(.+)", re.IGNORECASE)
 _MAX_WECHAT_PAGE_SIZE = 20
 
 _FREEPUBLISH_STATUS_MAP = {
@@ -70,6 +71,23 @@ def _parse_int(value: Any, default: int) -> int:
 
 def _string(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _extract_wechat_api_error(value: Any) -> tuple[int, str] | None:
+    text = _string(value)
+    if not text:
+        return None
+    match = _WECHAT_API_ERROR_RE.search(text)
+    if not match:
+        return None
+    return _parse_int(match.group(1), 0), _string(match.group(2))
+
+
+def _is_wechat_api_error(exc: Exception, errcode: int) -> bool:
+    parsed = _extract_wechat_api_error(exc)
+    if not parsed:
+        return False
+    return parsed[0] == errcode
 
 
 def _json_dumps(value: Any) -> str:
@@ -828,6 +846,17 @@ def _friendly_wechat_error(exc: Exception) -> str:
     if isinstance(exc, URLError):
         reason = str(getattr(exc, "reason", exc))
         return f"微信公众号接口网络异常：{reason}"
+    parsed = _extract_wechat_api_error(exc)
+    if parsed:
+        errcode, errmsg = parsed
+        if errcode == 48001:
+            rid_match = re.search(r"rid:\s*([a-zA-Z0-9-]+)", errmsg, re.IGNORECASE)
+            rid_text = f"（rid: {rid_match.group(1)}）" if rid_match else ""
+            return (
+                f"微信公众号接口未授权（errcode 48001）{rid_text}。"
+                "当前公众号没有该接口权限，常见于发布/群发能力未开通。"
+                "请在微信公众平台「开发-接口权限」确认，或先使用“同步到草稿箱”。"
+            )
     text = str(exc).strip()
     return text or "微信公众号操作失败"
 
@@ -871,7 +900,42 @@ def wechat_call_action(action: str, payload: dict[str, Any], db: Session, settin
 
         publish_mode = _string(payload.get("publish_mode") or config["publish_mode"] or "draft")
         if publish_mode == "publish":
-            publish_result = _submit_publish(access_token, media_id)
+            try:
+                publish_result = _submit_publish(access_token, media_id)
+            except Exception as exc:
+                if not _is_wechat_api_error(exc, 48001):
+                    raise
+                task = _create_task(
+                    db,
+                    task_type="draft",
+                    source_type="article",
+                    article_id=article.id,
+                    title=article.title or "",
+                    audience_type="draft",
+                    audience_value=media_id,
+                    created_by=actor_id,
+                    request_payload={
+                        "article_id": article.id,
+                        "publish_mode": "publish",
+                        "fallback_to_draft": True,
+                    },
+                    response_payload=draft_result,
+                    result_payload={"publish_error": str(exc)},
+                    draft_media_id=media_id,
+                    status="draft",
+                    status_text="发布接口未授权，已保存到微信草稿箱",
+                    finished_at=_utcnow(),
+                )
+                return {
+                    "ok": True,
+                    "message": "公众号未授权发布接口，已自动保存到微信草稿箱",
+                    "mode": "draft",
+                    "article_id": article.id,
+                    "title": article.title,
+                    "media_id": media_id,
+                    "warning": str(exc),
+                    "task": _serialize_task(task),
+                }
             publish_id = _string(publish_result.get("publish_id"))
             task = _create_task(
                 db,

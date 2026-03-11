@@ -44,3 +44,13 @@ def test_friendly_wechat_error_includes_upstream_detail_for_asset_403() -> None:
 
     assert "上游详情：RHIE" in message
     assert "防盗链" in message
+
+
+def test_friendly_wechat_error_for_wechat_api_48001() -> None:
+    error = RuntimeError("WeChat API error 48001: api unauthorized rid: 69b12639-23d157f7-761e900f")
+
+    message = _friendly_wechat_error(error)
+
+    assert "errcode 48001" in message
+    assert "接口未授权" in message
+    assert "rid: 69b12639-23d157f7-761e900f" in message
