@@ -359,6 +359,9 @@ def load_wechat_settings(db: Session, _: Settings) -> dict[str, Any]:
     return {
         "app_id": values.get("app_id", ""),
         "app_secret": values.get("app_secret", ""),
+        "callback_token": values.get("callback_token", ""),
+        "callback_reply_text": values.get("callback_reply_text", "公众号服务已连接，当前请在后台完成发布操作。"),
+        "callback_subscribe_reply": values.get("callback_subscribe_reply", "欢迎关注 Martin Blog。"),
         "author": values.get("author", ""),
         "publish_mode": values.get("publish_mode", "draft") or "draft",
         "content_source_url_base": values.get("content_source_url_base", ""),
@@ -377,6 +380,9 @@ def save_wechat_settings(db: Session, payload: dict[str, Any], settings: Setting
     merged = {
         "app_id": _string(payload.get("app_id", current["app_id"])),
         "app_secret": _string(payload.get("app_secret", current["app_secret"])),
+        "callback_token": _string(payload.get("callback_token", current["callback_token"])),
+        "callback_reply_text": _string(payload.get("callback_reply_text", current["callback_reply_text"])),
+        "callback_subscribe_reply": _string(payload.get("callback_subscribe_reply", current["callback_subscribe_reply"])),
         "author": _string(payload.get("author", current["author"])),
         "publish_mode": _string(payload.get("publish_mode", current["publish_mode"])) or "draft",
         "content_source_url_base": _string(payload.get("content_source_url_base", current["content_source_url_base"])),
@@ -795,6 +801,16 @@ def _build_dashboard_summary(db: Session) -> dict[str, Any]:
 
 def _friendly_wechat_error(exc: Exception) -> str:
     if isinstance(exc, HTTPError):
+        target_url = str(getattr(exc, "filename", "") or getattr(exc, "url", "") or "").strip()
+        host = urlparse.urlsplit(target_url).netloc.lower()
+        if host == "api.weixin.qq.com":
+            if exc.code == 403:
+                return "微信公众号接口返回错误（HTTP 403），请检查公众号后台 IP 白名单、AppID/AppSecret 和接口权限配置"
+            return f"微信公众号接口返回错误（HTTP {exc.code}）"
+        if host:
+            if exc.code == 403:
+                return f"公众号素材地址拒绝访问（HTTP 403）：{host}。请确认封面图或正文图片链接允许公网匿名读取"
+            return f"公众号素材地址返回错误（HTTP {exc.code}）：{host}"
         return f"微信公众号接口返回错误（HTTP {exc.code}）"
     if isinstance(exc, URLError):
         reason = str(getattr(exc, "reason", exc))
@@ -1224,6 +1240,9 @@ WECHAT_PLUGIN = PluginSpec(
     settings_schema=[
         PluginSettingField(key="app_id", label="AppID", type="text", required=True, placeholder="公众号 AppID"),
         PluginSettingField(key="app_secret", label="AppSecret", type="password", required=True, secret=True, placeholder="公众号 AppSecret"),
+        PluginSettingField(key="callback_token", label="回调 Token", type="text", placeholder="微信后台开发者服务器使用的 Token"),
+        PluginSettingField(key="callback_reply_text", label="默认消息回复", type="text", placeholder="收到文本消息时返回"),
+        PluginSettingField(key="callback_subscribe_reply", label="关注欢迎语", type="text", placeholder="收到关注事件时返回"),
         PluginSettingField(key="author", label="默认作者", type="text", placeholder="为空时使用文章作者"),
         PluginSettingField(key="content_source_url_base", label="文章原文链接前缀", type="text", placeholder="例如 https://martin88.xyz/article"),
         PluginSettingField(
