@@ -9,6 +9,8 @@ from qiniu import Auth
 # 如果需要更高安全性，建议移入 app/core/config.py 或环境变量
 URL_SIGN_SECRET = "martin_blog_2024_secret_key"
 QINIU_SECURITY_QUERY_KEYS = {"sign", "t", "e", "token"}
+_URL_QUERY_SAFE_CHARS = "/?:@-._~!$&'()*+,;=%[]"
+_URL_FRAGMENT_SAFE_CHARS = _URL_QUERY_SAFE_CHARS
 
 def generate_signed_key(key: str, timestamp: int) -> str:
     """生成资源key的签名 (用于前端直传后的验证)"""
@@ -58,6 +60,12 @@ def _encode_url_path(path: str) -> str:
     return '/'.join(encoded_parts)
 
 
+def _encode_url_part(value: str, *, safe: str) -> str:
+    if not value:
+        return value
+    return urllib.parse.quote(value, safe=safe)
+
+
 def normalize_remote_url(url: str) -> str:
     """规范化远程 URL，避免路径中的空格或中文导致请求异常。"""
     if not url:
@@ -69,8 +77,8 @@ def normalize_remote_url(url: str) -> str:
             return url
 
         normalized_path = _encode_url_path(parsed.path)
-        normalized_query = parsed.query.replace(" ", "%20")
-        normalized_fragment = parsed.fragment.replace(" ", "%20")
+        normalized_query = _encode_url_part(parsed.query, safe=_URL_QUERY_SAFE_CHARS)
+        normalized_fragment = _encode_url_part(parsed.fragment, safe=_URL_FRAGMENT_SAFE_CHARS)
         return urllib.parse.urlunsplit((
             parsed.scheme,
             parsed.netloc,
