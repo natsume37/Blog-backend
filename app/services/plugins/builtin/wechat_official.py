@@ -411,9 +411,16 @@ def _build_wechat_article_payload(article: Article, db: Session, config: dict[st
     html_content = _render_article_html(article.content or "")
     html_content = _rewrite_content_images(access_token, html_content)
 
-    thumb_media_id = _string(config.get("fallback_thumb_media_id"))
+    fallback_thumb_media_id = _string(config.get("fallback_thumb_media_id"))
+    thumb_media_id = fallback_thumb_media_id
     if article.cover and _is_remote_url(article.cover):
-        thumb_media_id = _upload_cover_as_material(access_token, article.cover)
+        try:
+            thumb_media_id = _upload_cover_as_material(access_token, article.cover)
+        except Exception as exc:
+            if fallback_thumb_media_id:
+                thumb_media_id = fallback_thumb_media_id
+            else:
+                raise RuntimeError("文章封面上传到微信失败，且插件未配置 fallback_thumb_media_id") from exc
     if not thumb_media_id:
         raise ValueError("文章没有可用封面，且插件未配置 fallback_thumb_media_id")
 
@@ -803,13 +810,19 @@ def _friendly_wechat_error(exc: Exception) -> str:
     if isinstance(exc, HTTPError):
         target_url = str(getattr(exc, "filename", "") or getattr(exc, "url", "") or "").strip()
         host = urlparse.urlsplit(target_url).netloc.lower()
+        detail = _string(getattr(getattr(exc, "headers", None), "get", lambda _k: "")("X-Error-Detail"))
         if host == "api.weixin.qq.com":
             if exc.code == 403:
                 return "微信公众号接口返回错误（HTTP 403），请检查公众号后台 IP 白名单、AppID/AppSecret 和接口权限配置"
             return f"微信公众号接口返回错误（HTTP {exc.code}）"
         if host:
             if exc.code == 403:
-                return f"公众号素材地址拒绝访问（HTTP 403）：{host}。请确认封面图或正文图片链接允许公网匿名读取"
+                base = f"公众号素材地址拒绝访问（HTTP 403）：{host}。请确认封面图或正文图片链接允许公网匿名读取"
+                if detail:
+                    base = f"{base}（上游详情：{detail}）"
+                if detail.lower() in {"rhie", "ts err"}:
+                    base = f"{base} 该域名可能启用了防盗链或时间戳鉴权。"
+                return base
             return f"公众号素材地址返回错误（HTTP {exc.code}）：{host}"
         return f"微信公众号接口返回错误（HTTP {exc.code}）"
     if isinstance(exc, URLError):
