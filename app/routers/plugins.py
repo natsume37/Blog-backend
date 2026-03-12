@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_admin
 from app.models.user import User
 from app.schemas.common import ResponseModel
+from app.schemas.news import NewsNowSourceGroup
 from app.schemas.plugin import (
     PluginActionPayload,
     PluginActionResultResponse,
@@ -15,19 +16,23 @@ from app.schemas.plugin import (
     PluginSettingsPayload,
     PluginSettingsResponse,
 )
+from app.services.newsnow import get_newsnow_realtime_feed
 from app.services.plugins import (
     get_plugin_spec,
     get_plugin_with_state,
     install_plugin,
+    list_plugins_with_state,
     list_market_plugins,
     set_plugin_enabled,
 )
+from app.services.plugins.builtin.newsnow import NEWSNOW_PLUGIN_ID
 from app.services.plugins.builtin.wechat_official import _friendly_wechat_error
 from app.utils.audit import record_admin_action
 
 
 router = APIRouter(prefix="/plugins", tags=["插件"])
 logger = logging.getLogger(__name__)
+PUBLIC_PLUGIN_IDS = {NEWSNOW_PLUGIN_ID}
 
 
 def _friendly_plugin_error(exc: Exception, *, plugin_id: str | None = None, action: str | None = None) -> str:
@@ -66,6 +71,31 @@ def get_admin_plugins(
     settings: Settings = Depends(get_settings),
 ):
     return ResponseModel(code=200, msg="获取成功", data=list_market_plugins(db, settings))
+
+
+@router.get("/public", response_model=ResponseModel[list[str]])
+def get_public_plugins(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    items = list_plugins_with_state(db, settings)
+    enabled_ids = [
+        str(item.get("plugin_id") or "").strip()
+        for item in items
+        if str(item.get("plugin_id") or "").strip() in PUBLIC_PLUGIN_IDS and bool(item.get("enabled"))
+    ]
+    return ResponseModel(code=200, msg="获取成功", data=enabled_ids)
+
+
+@router.get("/newsnow/realtime", response_model=ResponseModel[list[NewsNowSourceGroup]])
+def get_public_newsnow_realtime(
+    limit: int = Query(default=12, ge=1, le=30),
+):
+    try:
+        data = get_newsnow_realtime_feed(limit_per_source=limit)
+        return ResponseModel(code=200, msg="获取成功", data=data)
+    except RuntimeError as exc:
+        return ResponseModel(code=502, msg=str(exc), data=[])
 
 
 @router.post("/{plugin_id}/install", response_model=ResponseModel[PluginItemResponse])
