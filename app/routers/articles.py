@@ -14,7 +14,8 @@ from app.models.article_version import ArticleVersion
 from app.models.user import User
 from app.schemas.article import (
     ArticleListItem, ArticleDetail, CategoryResponse, TagResponse,
-    ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles, ArticleBatchAction
+    ArticleCreate, ArticleUpdate, ArticleAdminListItem, CategoryWithArticles, ArticleBatchAction,
+    ArticleWechatRenderRequest, ArticleWechatRenderResponse,
 )
 from app.schemas.article_version import ArticleVersionItem
 from app.schemas.common import ResponseModel, PagedData
@@ -22,6 +23,7 @@ from app.utils.qiniu import strip_qiniu_params, refresh_qiniu_params_in_content
 from app.core.config import get_settings, Settings
 from app.core.security import hash_protection_answer, verify_protection_answer
 from app.utils.audit import record_admin_action
+from app.services.plugins.builtin.wechat_official import render_wechat_article_html
 
 
 router = APIRouter(prefix="/articles", tags=["文章"])
@@ -148,6 +150,28 @@ def get_admin_articles(
             current=current,
             size=size
         )
+    )
+
+
+@router.post("/admin/render/wechat", response_model=ResponseModel[ArticleWechatRenderResponse])
+def render_article_for_wechat(
+    payload: ArticleWechatRenderRequest,
+    _: User = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings),
+):
+    content = payload.content or ""
+    if settings.is_qiniu_enabled:
+        content = _strip_article_qiniu_access(content, settings)
+
+    result = render_wechat_article_html(
+        content,
+        summary=payload.summary or "",
+        include_summary=bool(payload.include_summary),
+    )
+    return ResponseModel(
+        code=200,
+        msg="公众号排版渲染成功",
+        data=ArticleWechatRenderResponse(**result),
     )
 
 

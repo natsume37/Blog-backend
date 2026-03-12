@@ -101,6 +101,19 @@ class ArticleBatchAction(BaseModel):
     action: str  # publish | unpublish | recycle | restore | delete
 
 
+class ArticleWechatRenderRequest(BaseModel):
+    title: Optional[str] = ""
+    summary: Optional[str] = ""
+    content: str
+    include_summary: bool = True
+
+
+class ArticleWechatRenderResponse(BaseModel):
+    html: str
+    plain_text: str = ""
+    warnings: List[str] = []
+
+
 class ArticleListItem(BaseModel):
     id: int
     title: str

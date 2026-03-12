@@ -205,6 +205,122 @@ def _absolute_article_url(base_url: str, article: Article) -> str:
     return f"{root}/article/{article.id}"
 
 
+_WECHAT_CONTAINER_STYLE = (
+    "font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,'PingFang SC','Hiragino Sans GB',"
+    "'Microsoft YaHei',sans-serif;"
+    "font-size:16px;line-height:1.75;color:#1f2937;word-break:break-word;"
+)
+_WECHAT_INLINE_CODE_STYLE = (
+    "font-family:Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;"
+    "font-size:0.92em;color:#c2410c;background:#fff7ed;padding:0.14em 0.42em;border-radius:6px;"
+)
+_WECHAT_CODE_BLOCK_STYLE = (
+    "margin:1.5em 0;padding:16px 18px;background:#0f172a;color:#e2e8f0;border-radius:16px;"
+    "overflow-x:auto;font-size:13px;line-height:1.8;"
+)
+_WECHAT_CODE_BLOCK_TEXT_STYLE = (
+    "display:block;white-space:pre-wrap;word-break:break-word;"
+    "font-family:Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;"
+    "font-size:13px;line-height:1.8;color:inherit;background:transparent;padding:0;"
+)
+_WECHAT_INLINE_TAG_STYLES = {
+    "p": "margin:0 0 1.25em;color:#1f2937;text-align:justify;",
+    "h1": "margin:1.9em 0 0.9em;font-size:1.65em;line-height:1.35;color:#0f172a;font-weight:700;",
+    "h2": "margin:1.7em 0 0.8em;font-size:1.35em;line-height:1.45;color:#0f172a;font-weight:700;",
+    "h3": "margin:1.45em 0 0.7em;font-size:1.14em;line-height:1.55;color:#0f172a;font-weight:700;",
+    "h4": "margin:1.3em 0 0.6em;font-size:1.05em;line-height:1.6;color:#0f172a;font-weight:700;",
+    "h5": "margin:1.2em 0 0.5em;font-size:1em;line-height:1.6;color:#0f172a;font-weight:700;",
+    "h6": "margin:1.2em 0 0.5em;font-size:0.95em;line-height:1.6;color:#0f172a;font-weight:700;",
+    "blockquote": "margin:1.4em 0;padding:14px 16px;background:#f8fafc;border-left:4px solid #2563eb;border-radius:0 14px 14px 0;color:#475569;",
+    "pre": _WECHAT_CODE_BLOCK_STYLE,
+    "code": _WECHAT_INLINE_CODE_STYLE,
+    "a": "color:#2563eb;text-decoration:underline;text-underline-offset:3px;word-break:break-all;",
+    "img": "display:block;width:100%;max-width:100%;height:auto;margin:1.5em auto;border-radius:18px;",
+    "ul": "margin:0 0 1.25em;padding-left:1.4em;color:#1f2937;",
+    "ol": "margin:0 0 1.25em;padding-left:1.4em;color:#1f2937;",
+    "li": "margin:0.35em 0;line-height:1.75;",
+    "strong": "font-weight:700;color:#0f172a;",
+    "em": "font-style:italic;",
+    "del": "color:#64748b;",
+    "table": "width:100%;margin:1.5em 0;border-collapse:collapse;font-size:0.95em;line-height:1.7;",
+    "thead": "background:#f8fafc;",
+    "tbody": "",
+    "tr": "border-bottom:1px solid #e2e8f0;",
+    "th": "padding:10px 12px;border:1px solid #e2e8f0;text-align:left;font-weight:700;color:#0f172a;background:#f8fafc;",
+    "td": "padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155;vertical-align:top;",
+    "hr": "border:none;border-top:1px solid #e2e8f0;margin:2em 0;",
+    "br": "",
+}
+_WECHAT_ALLOWED_ATTRS = {
+    "a": {"href", "title"},
+    "img": {"src", "alt", "title"},
+    "th": {"colspan", "rowspan"},
+    "td": {"colspan", "rowspan"},
+}
+_WECHAT_ALLOWED_TAGS = set(_WECHAT_INLINE_TAG_STYLES.keys())
+_WECHAT_TAG_RE = re.compile(r"<(/?)([a-zA-Z0-9]+)\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+_WECHAT_ATTR_RE = re.compile(
+    r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(".*?"|'.*?'|[^\s"'=<>`]+)""",
+    re.DOTALL,
+)
+_WECHAT_SCRIPT_STYLE_RE = re.compile(r"(?is)<(script|style|noscript)\b[^>]*>.*?</\1>")
+_WECHAT_MEDIA_TAG_RE = re.compile(r"(?is)<(video|audio|iframe)\b([^>]*)>(.*?)</\1>")
+_WECHAT_MEDIA_SELF_TAG_RE = re.compile(r"(?is)<(video|audio|iframe)\b([^>]*)/?>")
+_WECHAT_PRE_CODE_OPEN_RE = re.compile(r"(?is)(<pre\b[^>]*>)\s*<code\b[^>]*>")
+_WECHAT_PRE_CODE_CLOSE_RE = re.compile(r"(?is)</code>\s*(</pre>)")
+_WECHAT_IMG_TAG_RE = re.compile(r"(?is)<img\b([^>]*)>")
+_WECHAT_SOURCE_SRC_RE = re.compile(r"""(?is)<source\b[^>]*\bsrc\s*=\s*(['"]?)([^'">\s]+)\1""")
+_WECHAT_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_WECHAT_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$")
+_WECHAT_UNORDERED_LIST_RE = re.compile(r"^[-+*]\s+")
+_WECHAT_ORDERED_LIST_RE = re.compile(r"^\d+\.\s+")
+
+
+def _render_markdown_media_as_link(tag: str, source_url: str) -> str:
+    safe_url = _sanitize_html_target(source_url)
+    if not safe_url:
+        return ""
+    label_map = {"video": "视频", "audio": "音频", "iframe": "嵌入内容"}
+    label = label_map.get(tag, "媒体")
+    return f"\n\n{label}内容请查看原链接：[{safe_url}]({safe_url})\n\n"
+
+
+def _replace_raw_markdown_media_tag(match: re.Match[str]) -> str:
+    tag = match.group(1).lower()
+    attrs = _parse_html_attrs(match.group(2) or "")
+    inner_html = match.group(3) or ""
+    source_url = attrs.get("src", "")
+    if not source_url:
+        source_match = _WECHAT_SOURCE_SRC_RE.search(inner_html)
+        if source_match:
+            source_url = source_match.group(2)
+    return _render_markdown_media_as_link(tag, source_url)
+
+
+def _replace_raw_markdown_media_self_tag(match: re.Match[str]) -> str:
+    tag = match.group(1).lower()
+    attrs = _parse_html_attrs(match.group(2) or "")
+    return _render_markdown_media_as_link(tag, attrs.get("src", ""))
+
+
+def _replace_raw_markdown_img_tag(match: re.Match[str]) -> str:
+    attrs = _parse_html_attrs(match.group(1) or "")
+    source_url = _sanitize_html_target(attrs.get("src", ""))
+    if not source_url:
+        return ""
+    alt_text = str(attrs.get("alt", "") or "").strip()
+    return f"\n\n![{alt_text}]({source_url})\n\n"
+
+
+def _prepare_markdown_for_wechat(markdown_text: str) -> str:
+    text = str(markdown_text or "")
+    text = _WECHAT_SCRIPT_STYLE_RE.sub("", text)
+    text = _WECHAT_MEDIA_TAG_RE.sub(_replace_raw_markdown_media_tag, text)
+    text = _WECHAT_MEDIA_SELF_TAG_RE.sub(_replace_raw_markdown_media_self_tag, text)
+    text = _WECHAT_IMG_TAG_RE.sub(_replace_raw_markdown_img_tag, text)
+    return text
+
+
 def _load_markdown_converter():
     try:
         from markdown import markdown as render_markdown  # type: ignore
@@ -221,56 +337,183 @@ def _load_markdown_converter():
         return None
 
 
+def _fallback_render_inline_markdown(text: str) -> str:
+    tokens: dict[str, str] = {}
+
+    def _placeholder(value: str) -> str:
+        key = f"__BLOG_HTML_TOKEN_{len(tokens)}__"
+        tokens[key] = value
+        return key
+
+    source = str(text or "")
+    source = re.sub(
+        r"`([^`]+)`",
+        lambda match: _placeholder(f"<code>{html.escape(match.group(1))}</code>"),
+        source,
+    )
+    source = re.sub(
+        r"!\[([^\]]*)\]\(([^)]+)\)",
+        lambda match: _placeholder(
+            f'<img src="{html.escape(_sanitize_html_target(match.group(2)), quote=True)}" '
+            f'alt="{html.escape(match.group(1), quote=True)}" />'
+        ),
+        source,
+    )
+    source = re.sub(
+        r"\[([^\]]+)\]\(([^)]+)\)",
+        lambda match: _placeholder(
+            f'<a href="{html.escape(_sanitize_html_target(match.group(2)), quote=True)}">{html.escape(match.group(1))}</a>'
+        ),
+        source,
+    )
+    source = re.sub(
+        r"\*\*([^*]+)\*\*",
+        lambda match: _placeholder(f"<strong>{html.escape(match.group(1))}</strong>"),
+        source,
+    )
+    source = re.sub(
+        r"~~([^~]+)~~",
+        lambda match: _placeholder(f"<del>{html.escape(match.group(1))}</del>"),
+        source,
+    )
+    source = re.sub(
+        r"(?<!\*)\*([^*]+)\*(?!\*)",
+        lambda match: _placeholder(f"<em>{html.escape(match.group(1))}</em>"),
+        source,
+    )
+
+    escaped = html.escape(source)
+    for key, value in tokens.items():
+        escaped = escaped.replace(key, value)
+    return escaped
+
+
+def _split_markdown_table_cells(line: str) -> list[str]:
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in stripped.split("|")]
+
+
 def _fallback_markdown_to_html(text: str) -> str:
     blocks: list[str] = []
     lines = (text or "").splitlines()
-    in_code = False
-    code_lines: list[str] = []
     para_lines: list[str] = []
 
     def flush_para() -> None:
         if not para_lines:
             return
-        escaped = " ".join(html.escape(item.strip()) for item in para_lines if item.strip())
+        escaped = _fallback_render_inline_markdown(" ".join(item.strip() for item in para_lines if item.strip()))
         if escaped:
             blocks.append(f"<p>{escaped}</p>")
         para_lines.clear()
 
-    for line in lines:
-        if line.strip().startswith("```"):
-            if in_code:
-                blocks.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
-                code_lines.clear()
-                in_code = False
-            else:
-                flush_para()
-                in_code = True
-            continue
-        if in_code:
-            code_lines.append(line)
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            flush_para()
+            code_lines: list[str] = []
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                code_lines.append(lines[index])
+                index += 1
+            blocks.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+            if index < len(lines) and lines[index].strip().startswith("```"):
+                index += 1
             continue
 
-        stripped = line.strip()
         if not stripped:
             flush_para()
+            index += 1
             continue
+
+        if (
+            index + 1 < len(lines)
+            and "|" in line
+            and _WECHAT_MARKDOWN_TABLE_SEPARATOR_RE.match(lines[index + 1].strip() or "")
+        ):
+            flush_para()
+            header_cells = _split_markdown_table_cells(line)
+            table_rows: list[list[str]] = []
+            index += 2
+            while index < len(lines):
+                row_line = lines[index].strip()
+                if not row_line or "|" not in row_line:
+                    break
+                table_rows.append(_split_markdown_table_cells(lines[index]))
+                index += 1
+            header_html = "".join(f"<th>{_fallback_render_inline_markdown(cell)}</th>" for cell in header_cells)
+            body_html = "".join(
+                "<tr>" + "".join(f"<td>{_fallback_render_inline_markdown(cell)}</td>" for cell in row) + "</tr>"
+                for row in table_rows
+            )
+            blocks.append(f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>")
+            continue
+
         if stripped.startswith("### "):
             flush_para()
-            blocks.append(f"<h3>{html.escape(stripped[4:])}</h3>")
+            blocks.append(f"<h3>{_fallback_render_inline_markdown(stripped[4:])}</h3>")
+            index += 1
             continue
         if stripped.startswith("## "):
             flush_para()
-            blocks.append(f"<h2>{html.escape(stripped[3:])}</h2>")
+            blocks.append(f"<h2>{_fallback_render_inline_markdown(stripped[3:])}</h2>")
+            index += 1
             continue
         if stripped.startswith("# "):
             flush_para()
-            blocks.append(f"<h1>{html.escape(stripped[2:])}</h1>")
+            blocks.append(f"<h1>{_fallback_render_inline_markdown(stripped[2:])}</h1>")
+            index += 1
             continue
+        if stripped in {"---", "***", "___"}:
+            flush_para()
+            blocks.append("<hr />")
+            index += 1
+            continue
+        if stripped.startswith("> "):
+            flush_para()
+            quote_lines: list[str] = []
+            while index < len(lines) and lines[index].strip().startswith("> "):
+                quote_lines.append(lines[index].strip()[2:])
+                index += 1
+            blocks.append(f"<blockquote><p>{_fallback_render_inline_markdown(' '.join(quote_lines))}</p></blockquote>")
+            continue
+        if _WECHAT_UNORDERED_LIST_RE.match(stripped):
+            flush_para()
+            items: list[str] = []
+            while index < len(lines):
+                current = lines[index].strip()
+                if not _WECHAT_UNORDERED_LIST_RE.match(current):
+                    break
+                items.append(re.sub(_WECHAT_UNORDERED_LIST_RE, "", current, count=1))
+                index += 1
+            blocks.append(
+                "<ul>" + "".join(f"<li>{_fallback_render_inline_markdown(item)}</li>" for item in items) + "</ul>"
+            )
+            continue
+        if _WECHAT_ORDERED_LIST_RE.match(stripped):
+            flush_para()
+            items = []
+            while index < len(lines):
+                current = lines[index].strip()
+                if not _WECHAT_ORDERED_LIST_RE.match(current):
+                    break
+                items.append(re.sub(_WECHAT_ORDERED_LIST_RE, "", current, count=1))
+                index += 1
+            blocks.append(
+                "<ol>" + "".join(f"<li>{_fallback_render_inline_markdown(item)}</li>" for item in items) + "</ol>"
+            )
+            continue
+
         para_lines.append(line)
+        index += 1
 
     flush_para()
-    if in_code and code_lines:
-        blocks.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
     return "\n".join(blocks)
 
 
@@ -279,6 +522,200 @@ def _render_article_html(markdown_text: str) -> str:
     if renderer:
         return renderer(markdown_text or "")
     return _fallback_markdown_to_html(markdown_text or "")
+
+
+def _merge_inline_style(existing: str, extra: str) -> str:
+    parts = [item.strip().rstrip(";") for item in (existing, extra) if item and item.strip()]
+    if not parts:
+        return ""
+    return "; ".join(parts) + ";"
+
+
+def _parse_html_attrs(raw_attrs: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for match in _WECHAT_ATTR_RE.finditer(raw_attrs or ""):
+        key = match.group(1).strip().lower()
+        value = match.group(2).strip()
+        if value[:1] in {'"', "'"} and value[-1:] == value[:1]:
+            value = value[1:-1]
+        attrs[key] = html.unescape(value)
+    return attrs
+
+
+def _build_html_tag(tag: str, attrs: dict[str, str], *, self_closing: bool = False) -> str:
+    attr_text = "".join(
+        f' {key}="{html.escape(value, quote=True)}"'
+        for key, value in attrs.items()
+        if str(value or "").strip()
+    )
+    if self_closing:
+        return f"<{tag}{attr_text} />"
+    return f"<{tag}{attr_text}>"
+
+
+def _sanitize_html_target(value: str) -> str:
+    text = html.unescape(str(value or "")).strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered.startswith(("javascript:", "vbscript:")):
+        return ""
+    return text
+
+
+def _render_wechat_media_fallback(tag: str, source_url: str) -> str:
+    safe_url = _sanitize_html_target(source_url)
+    if not safe_url:
+        return ""
+    label_map = {"video": "视频", "audio": "音频", "iframe": "嵌入内容"}
+    label = label_map.get(tag, "媒体")
+    link = html.escape(safe_url, quote=True)
+    return (
+        '<p style="margin:0 0 1.25em;color:#475569;">'
+        f"{label}内容请查看原链接："
+        f'<a href="{link}" style="{_WECHAT_INLINE_TAG_STYLES["a"]}">{link}</a>'
+        "</p>"
+    )
+
+
+def _replace_wechat_media_tag(match: re.Match[str]) -> str:
+    tag = match.group(1).lower()
+    attrs = _parse_html_attrs(match.group(2) or "")
+    inner_html = match.group(3) or ""
+    source_url = attrs.get("src", "")
+    if not source_url:
+        source_match = _WECHAT_SOURCE_SRC_RE.search(inner_html)
+        if source_match:
+            source_url = source_match.group(2)
+    return _render_wechat_media_fallback(tag, source_url)
+
+
+def _replace_wechat_media_self_tag(match: re.Match[str]) -> str:
+    tag = match.group(1).lower()
+    attrs = _parse_html_attrs(match.group(2) or "")
+    return _render_wechat_media_fallback(tag, attrs.get("src", ""))
+
+
+def _replace_wechat_tag(match: re.Match[str]) -> str:
+    is_closing = bool(match.group(1))
+    tag = match.group(2).lower()
+    raw_attrs = match.group(3) or ""
+    if is_closing:
+        return f"</{tag}>" if tag in _WECHAT_ALLOWED_TAGS else ""
+
+    if tag not in _WECHAT_ALLOWED_TAGS:
+        return ""
+
+    attrs = _parse_html_attrs(raw_attrs)
+    allowed_names = _WECHAT_ALLOWED_ATTRS.get(tag, set())
+    sanitized: dict[str, str] = {}
+    for name, value in attrs.items():
+        if name not in allowed_names:
+            continue
+        cleaned = _sanitize_html_target(value) if name in {"href", "src"} else str(value or "").strip()
+        if cleaned:
+            sanitized[name] = cleaned
+
+    if tag == "img" and not sanitized.get("src"):
+        return ""
+
+    inline_style = _WECHAT_INLINE_TAG_STYLES.get(tag, "")
+    if inline_style:
+        sanitized["style"] = _merge_inline_style(sanitized.get("style", ""), inline_style)
+
+    return _build_html_tag(tag, sanitized, self_closing=tag in {"img", "hr", "br"})
+
+
+def _render_wechat_summary(summary: str) -> str:
+    safe_summary = html.escape(str(summary or "").strip())
+    if not safe_summary:
+        return ""
+    return (
+        '<section style="margin:0 0 1.5em;padding:14px 16px;background:#f8fafc;'
+        'border-left:4px solid #2563eb;border-radius:0 16px 16px 0;">'
+        '<p style="margin:0 0 0.4em;font-size:0.8em;letter-spacing:0.08em;text-transform:uppercase;'
+        'color:#2563eb;font-weight:700;">Summary</p>'
+        f'<p style="margin:0;color:#475569;">{safe_summary}</p>'
+        "</section>"
+    )
+
+
+def _normalize_wechat_pre_code(html_content: str) -> str:
+    html_content = _WECHAT_PRE_CODE_OPEN_RE.sub(
+        lambda match: f'{match.group(1)}<code style="{_WECHAT_CODE_BLOCK_TEXT_STYLE}">',
+        html_content,
+    )
+    return _WECHAT_PRE_CODE_CLOSE_RE.sub(lambda match: f"</code>{match.group(1)}", html_content)
+
+
+def _build_wechat_plain_text(html_content: str) -> str:
+    text = re.sub(r"(?i)<br\s*/?>", "\n", html_content or "")
+    text = re.sub(r"(?i)</(p|div|section|blockquote|li|h[1-6]|tr)>", "\n", text)
+    text = re.sub(r"(?i)</(table|thead|tbody|ul|ol|pre)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _collect_wechat_render_warnings(markdown_text: str) -> list[str]:
+    warnings: list[str] = []
+    raw_text = str(markdown_text or "")
+    if _WECHAT_SCRIPT_STYLE_RE.search(raw_text):
+        warnings.append("检测到 script/style/noscript 标签，导出时已自动剔除。")
+    if re.search(r"(?is)<(video|audio|iframe)\b", raw_text):
+        warnings.append("检测到视频、音频或 iframe，已降级为普通链接，请在公众号里手动检查。")
+    has_markdown_table = any(
+        _WECHAT_MARKDOWN_TABLE_SEPARATOR_RE.match(line.strip() or "")
+        for line in raw_text.splitlines()
+    )
+    if re.search(r"(?is)<table\b", raw_text) or has_markdown_table:
+        warnings.append("检测到表格，公众号编辑器对宽表格支持有限，建议粘贴后检查换行和边框。")
+    for match in _WECHAT_IMG_TAG_RE.finditer(raw_text):
+        attrs = _parse_html_attrs(match.group(1) or "")
+        src = _sanitize_html_target(attrs.get("src", ""))
+        if not src:
+            continue
+        if src.lower().startswith("data:"):
+            warnings.append("检测到 base64 图片，公众号粘贴后可能体积过大或显示异常，建议换成公网图片地址。")
+            break
+        if not _is_remote_url(src):
+            warnings.append("检测到相对路径或本地图片地址，公众号通常无法直接抓取，请换成公网可访问图片。")
+            break
+    else:
+        for _, src in _WECHAT_MARKDOWN_IMAGE_RE.findall(raw_text):
+            target = _sanitize_html_target(src)
+            if not target:
+                continue
+            if target.lower().startswith("data:"):
+                warnings.append("检测到 base64 图片，公众号粘贴后可能体积过大或显示异常，建议换成公网图片地址。")
+                break
+            if not _is_remote_url(target):
+                warnings.append("检测到相对路径或本地图片地址，公众号通常无法直接抓取，请换成公网可访问图片。")
+                break
+    return warnings
+
+
+def render_wechat_article_html(markdown_text: str, *, summary: str = "", include_summary: bool = True) -> dict[str, Any]:
+    prepared_markdown = _prepare_markdown_for_wechat(markdown_text or "")
+    raw_html = _render_article_html(prepared_markdown)
+    warnings = _collect_wechat_render_warnings(markdown_text or "")
+
+    body_html = _WECHAT_SCRIPT_STYLE_RE.sub("", raw_html)
+    body_html = _WECHAT_MEDIA_TAG_RE.sub(_replace_wechat_media_tag, body_html)
+    body_html = _WECHAT_MEDIA_SELF_TAG_RE.sub(_replace_wechat_media_self_tag, body_html)
+    body_html = _WECHAT_TAG_RE.sub(_replace_wechat_tag, body_html)
+    body_html = _normalize_wechat_pre_code(body_html)
+
+    if include_summary and str(summary or "").strip():
+        body_html = f"{_render_wechat_summary(summary)}{body_html}"
+
+    wrapped_html = f'<section data-blog-wechat-render="1" style="{_WECHAT_CONTAINER_STYLE}">{body_html}</section>'
+    return {
+        "html": wrapped_html,
+        "plain_text": _build_wechat_plain_text(wrapped_html),
+        "warnings": warnings,
+    }
 
 
 def _exchange_access_token(app_id: str, app_secret: str, timeout: int = 20) -> str:
@@ -426,7 +863,11 @@ def _ensure_wechat_ready(config: dict[str, Any]) -> None:
 def _build_wechat_article_payload(article: Article, db: Session, config: dict[str, Any], access_token: str) -> dict[str, Any]:
     source_url = _absolute_article_url(_string(config.get("content_source_url_base")), article)
     author_name = _resolve_author_name(article, db, _string(config.get("author")))
-    html_content = _render_article_html(article.content or "")
+    html_content = render_wechat_article_html(
+        article.content or "",
+        summary=article.summary or "",
+        include_summary=True,
+    )["html"]
     html_content = _rewrite_content_images(access_token, html_content)
 
     fallback_thumb_media_id = _string(config.get("fallback_thumb_media_id"))
