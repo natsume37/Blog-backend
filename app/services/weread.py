@@ -360,17 +360,21 @@ def sync_weread_records(db: Session, cfg: Settings = settings, force_notes: bool
             review_count = int((notebook or {}).get("reviewCount") or 0)
             bookmark_count = int((notebook or {}).get("bookmarkCount") or 0)
 
+            is_secret = bool(int(item.get("secret") or 0))
             record = db.query(BookRecord).filter(BookRecord.source == "weread", BookRecord.source_id == book_id).first()
             old_note_count = record.note_count if record else -1
             if not record:
                 color, accent = _stable_cover_colors(book_id)
                 record = BookRecord(source="weread", source_id=book_id, color=color, accent=accent)
+                record.visibility = "private" if is_secret else "public"
                 db.add(record)
+            elif record.visibility not in {"public", "login", "private"}:
+                record.visibility = "private" if is_secret else "public"
 
             tags = [str(item.get("category") or "").strip(), "微信读书"]
             if note_count > 0:
                 tags.append("有笔记")
-            if bool(int(item.get("secret") or 0)):
+            if is_secret:
                 tags.append("私密阅读")
 
             record.title = str(item.get("title") or "未命名书籍")
@@ -386,7 +390,7 @@ def sync_weread_records(db: Session, cfg: Settings = settings, force_notes: bool
             record.review_count = review_count
             record.bookmark_count = bookmark_count
             record.tags_json = _json_list(tags)
-            record.is_private = bool(int(item.get("secret") or 0))
+            record.is_private = is_secret
             record.is_top = bool(int(item.get("isTop") or 0))
             record.is_in_shelf = True
             record.last_read_at = last_read_at
@@ -449,6 +453,8 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
         "note_summary": record.note_summary or "",
         "color": record.color or "#2f6c8f",
         "accent": record.accent or "#224c4a",
+        "visibility": record.visibility or "public",
+        "is_private": bool(record.is_private),
         "last_read_at": record.last_read_at,
         "finished_at": record.finished_at,
         "synced_at": record.synced_at,

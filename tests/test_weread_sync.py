@@ -106,6 +106,55 @@ def test_failed_sync_does_not_clear_existing_records(monkeypatch) -> None:
     assert record.is_in_shelf is True
 
 
+def test_sync_preserves_admin_visibility_for_existing_private_weread_book(monkeypatch) -> None:
+    db = _session()
+    db.add(BookRecord(
+        source="weread",
+        source_id="book-1",
+        title="Existing",
+        is_in_shelf=True,
+        is_private=False,
+        visibility="login",
+    ))
+    db.commit()
+
+    class FakeClient:
+        def __init__(self, _cfg):
+            pass
+
+        def call(self, api_name: str, **_params):
+            if api_name == "/shelf/sync":
+                return {
+                    "books": [
+                        {
+                            "bookId": "book-1",
+                            "title": "Existing",
+                            "author": "Author",
+                            "secret": 1,
+                            "finishReading": 0,
+                        }
+                    ]
+                }
+            if api_name == "/readdata/detail":
+                return {}
+            if api_name == "/user/notebooks":
+                return {"books": [], "hasMore": 0}
+            if api_name == "/book/getprogress":
+                return {"book": {"progress": 12, "recordReadingTime": 600}}
+            raise AssertionError(f"unexpected call: {api_name}")
+
+    monkeypatch.setattr(weread, "WeReadGatewayClient", FakeClient)
+    monkeypatch.setattr(weread, "_acquire_sync_lock", lambda _cfg: "lock-token")
+    monkeypatch.setattr(weread, "_release_sync_lock", lambda _token: None)
+
+    result = weread.sync_weread_records(db, _settings())
+    record = db.query(BookRecord).filter(BookRecord.source_id == "book-1").one()
+
+    assert result.status == "success"
+    assert record.is_private is True
+    assert record.visibility == "login"
+
+
 def test_sync_lock_release_only_deletes_own_token(monkeypatch) -> None:
     class FakeRedis:
         def __init__(self):

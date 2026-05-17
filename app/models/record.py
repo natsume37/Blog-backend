@@ -34,6 +34,7 @@ class BookRecord(Base):
     color = Column(String(20), default="#2f6c8f")
     accent = Column(String(20), default="#224c4a")
 
+    visibility = Column(String(20), default="public", nullable=False, index=True)
     is_private = Column(Boolean, default=False, nullable=False)
     is_top = Column(Boolean, default=False, nullable=False)
     is_in_shelf = Column(Boolean, default=True, nullable=False, index=True)
@@ -45,6 +46,32 @@ class BookRecord(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     notes = relationship("BookNoteSummary", back_populates="book", cascade="all, delete-orphan")
+
+
+class MovieRecord(Base):
+    __tablename__ = "movie_records"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    source = Column(String(30), default="manual", nullable=False, index=True)
+    source_id = Column(String(80), unique=True, nullable=False, index=True)
+
+    title = Column(String(255), nullable=False)
+    director = Column(String(255), default="")
+    cover = Column(String(500), default="")
+    format = Column(String(50), default="")
+    status = Column(String(30), default="想看", nullable=False, index=True)
+    progress = Column(Integer, default=0, nullable=False)
+    rating = Column(Integer, default=0, nullable=False)
+    duration_minutes = Column(Integer, default=0, nullable=False)
+    note = Column(Text, default="")
+    tags_json = Column(Text, default="[]")
+    color = Column(String(20), default="#2f5d7c")
+    accent = Column(String(20), default="#d6a35d")
+    visibility = Column(String(20), default="public", nullable=False, index=True)
+    is_top = Column(Boolean, default=False, nullable=False)
+    watched_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class BookNoteSummary(Base):

@@ -14,6 +14,6 @@ from app.models.friend_link import FriendLink
 from app.models.tool_item import ToolItem
 from app.models.plugin import PluginInstall, PluginSetting
 from app.models.wechat_plugin import WechatBroadcastTask, WechatQrCodeRecord
-from app.models.record import BookRecord, BookNoteSummary, WeReadSyncState
+from app.models.record import BookRecord, BookNoteSummary, MovieRecord, WeReadSyncState
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion", "FriendLink", "ToolItem", "PluginInstall", "PluginSetting", "WechatBroadcastTask", "WechatQrCodeRecord", "BookRecord", "BookNoteSummary", "WeReadSyncState"]
+__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion", "FriendLink", "ToolItem", "PluginInstall", "PluginSetting", "WechatBroadcastTask", "WechatQrCodeRecord", "BookRecord", "BookNoteSummary", "MovieRecord", "WeReadSyncState"]

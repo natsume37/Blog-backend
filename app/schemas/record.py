@@ -32,6 +32,8 @@ class BookRecordOut(BaseModel):
     note_summary: str = ""
     color: str
     accent: str
+    visibility: str = "public"
+    is_private: bool = False
     last_read_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     synced_at: Optional[datetime] = None
@@ -51,6 +53,40 @@ class BookRecordStatsOut(BaseModel):
     read_seconds: int
     read_duration: str
     last_sync_at: Optional[datetime] = None
+
+
+class MovieRecordOut(BaseModel):
+    id: int
+    source_id: str
+    title: str
+    director: str = ""
+    cover: str = ""
+    format: str = ""
+    status: str
+    progress: int
+    rating: float
+    duration_minutes: int
+    duration: str
+    note: str = ""
+    tags: list[str]
+    color: str
+    accent: str
+    visibility: str = "public"
+    is_top: bool = False
+    watched_at: Optional[datetime] = None
+
+
+class MovieRecordStatsOut(BaseModel):
+    total: int
+    monthly_count: int
+    finished_count: int
+    average_rating: float
+    total_duration_minutes: int
+    total_duration: str
+
+
+class RecordVisibilityUpdateIn(BaseModel):
+    visibility: str
 
 
 class BookTimeSeriesPointOut(BaseModel):
