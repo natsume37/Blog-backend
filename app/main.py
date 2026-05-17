@@ -16,7 +16,7 @@ from app.models.monitor import VisitLog
 
 from app.core.config import settings
 from app.core.logger import setup_logging
-from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources, ai, audit_logs, login_logs, friend_links, tool_items, plugins, wechat
+from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources, ai, audit_logs, login_logs, friend_links, tool_items, plugins, wechat, records
 from app.tasks import start_scheduler, stop_scheduler
 
 # Setup logging
@@ -238,6 +238,7 @@ app.include_router(login_logs.router, prefix="/api/v1")
 app.include_router(friend_links.router, prefix="/api/v1")
 app.include_router(tool_items.router, prefix="/api/v1")
 app.include_router(plugins.router, prefix="/api/v1")
+app.include_router(records.router, prefix="/api/v1")
 app.include_router(wechat.router)
 
 

@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # 定时任务配置 (Scheduler)
     # ===========================
     SYNC_VIEWS_INTERVAL_MINUTES: int = Field(default=10, description='文章浏览量同步周期(分钟)')
+    WEREAD_API_KEY: str | None = Field(default=None, description='微信读书官方 API Key')
+    WEREAD_SYNC_ENABLED: bool = Field(default=True, description='是否启用微信读书定时同步')
+    WEREAD_SYNC_INTERVAL_MINUTES: int = Field(default=30, description='微信读书同步周期(分钟)')
+    WEREAD_SKILL_VERSION: str = Field(default="1.0.3", description='微信读书 Skill 版本')
+    WEREAD_GATEWAY_URL: str = Field(
+        default="https://i.weread.qq.com/api/agent/gateway",
+        description='微信读书 Agent API Gateway 地址',
+    )
+    WEREAD_SYNC_LOCK_SECONDS: int = Field(default=900, description='微信读书同步锁有效期(秒)')
 
     # ===========================
     # 服务器配置 (Server)

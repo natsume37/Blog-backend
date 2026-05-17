@@ -5,11 +5,16 @@ from app.core.database import SessionLocal
 from app.core.cache import redis_client
 from app.models.article import Article
 from app.core.config import settings
+from app.services.weread import sync_weread_records
 
 logger = logging.getLogger(__name__)
 
 # 创建调度器实例
 scheduler = AsyncIOScheduler()
+
+
+def _should_register_weread_job() -> bool:
+    return bool(settings.WEREAD_SYNC_ENABLED and (settings.WEREAD_API_KEY or "").strip())
 
 async def sync_views_to_db():
     """
@@ -70,6 +75,18 @@ async def sync_views_to_db():
     finally:
         db.close()
 
+
+async def sync_weread_to_db():
+    """
+    定时任务：从微信读书官方 API 同步读书记录。
+    """
+    logger.info("Starting scheduled task: Sync WeRead records")
+    db = SessionLocal()
+    try:
+        sync_weread_records(db, settings)
+    finally:
+        db.close()
+
 def start_scheduler():
     """启动调度器"""
     if not scheduler.running:
@@ -85,6 +102,18 @@ def start_scheduler():
             name="Sync Article Views"
         )
         logger.info(f"Added sync_views_job with interval {settings.SYNC_VIEWS_INTERVAL_MINUTES} minutes")
+
+        if _should_register_weread_job():
+            scheduler.add_job(
+                sync_weread_to_db,
+                trigger=IntervalTrigger(minutes=settings.WEREAD_SYNC_INTERVAL_MINUTES),
+                id="sync_weread_job",
+                replace_existing=True,
+                name="Sync WeRead Records"
+            )
+            logger.info(f"Added sync_weread_job with interval {settings.WEREAD_SYNC_INTERVAL_MINUTES} minutes")
+        else:
+            logger.info("WeRead sync job not registered: disabled or WEREAD_API_KEY missing")
 
 def stop_scheduler():
     """关闭调度器"""
