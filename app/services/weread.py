@@ -91,6 +91,20 @@ def _loads_json_list(raw: str | None) -> list[str]:
     return []
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _stable_cover_colors(seed: str) -> tuple[str, str]:
     palettes = [
         ("#c66b3d", "#224c4a"),
@@ -453,6 +467,99 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
     return data
 
 
+def _load_sync_stats(state: WeReadSyncState | None) -> dict[str, Any]:
+    if not state or not state.stats_json:
+        return {}
+    try:
+        value = json.loads(state.stats_json)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def book_time_stats_to_dict(state: WeReadSyncState | None, records: list[BookRecord]) -> dict[str, Any]:
+    stats = _load_sync_stats(state)
+    record_read_seconds = sum(item.read_seconds or 0 for item in records)
+    record_by_source_id = {item.source_id: item for item in records if item.source_id}
+
+    daily = []
+    read_times = stats.get("readTimes") if isinstance(stats.get("readTimes"), dict) else {}
+    for raw_timestamp, raw_seconds in sorted(read_times.items(), key=lambda item: _safe_int(item[0])):
+        timestamp = _safe_int(raw_timestamp)
+        read_seconds = _safe_int(raw_seconds)
+        if timestamp <= 0:
+            continue
+        date = datetime.fromtimestamp(timestamp)
+        daily.append({
+            "timestamp": timestamp,
+            "date": date.strftime("%Y-%m-%d"),
+            "label": date.strftime("%m.%d"),
+            "read_seconds": read_seconds,
+            "read_duration": _seconds_to_duration(read_seconds),
+        })
+
+    total_read_seconds = _safe_int(stats.get("totalReadTime")) or sum(item["read_seconds"] for item in daily) or record_read_seconds
+    active_days = len([item for item in daily if item["read_seconds"] > 0])
+    read_days = _safe_int(stats.get("readDays")) or active_days
+    day_average_seconds = _safe_int(stats.get("dayAverageReadTime"))
+    if day_average_seconds <= 0 and read_days > 0:
+        day_average_seconds = total_read_seconds // read_days
+
+    categories = []
+    category_items = stats.get("preferCategory") if isinstance(stats.get("preferCategory"), list) else []
+    for item in category_items[:8]:
+        if not isinstance(item, dict):
+            continue
+        read_seconds = _safe_int(item.get("readingTime"))
+        name = str(item.get("categoryTitle") or item.get("parentCategoryTitle") or "未分类")
+        categories.append({
+            "name": name,
+            "parent_name": str(item.get("parentCategoryTitle") or ""),
+            "reading_count": _safe_int(item.get("readingCount")),
+            "read_seconds": read_seconds,
+            "read_duration": _seconds_to_duration(read_seconds),
+            "percent": round((read_seconds / total_read_seconds) * 100) if total_read_seconds else 0,
+        })
+
+    longest_books = []
+    longest_items = stats.get("readLongest") if isinstance(stats.get("readLongest"), list) else []
+    for item in longest_items[:8]:
+        if not isinstance(item, dict):
+            continue
+        book = item.get("book") if isinstance(item.get("book"), dict) else {}
+        source_id = str(book.get("bookId") or "")
+        record = record_by_source_id.get(source_id)
+        if not source_id or record is None:
+            continue
+        read_seconds = _safe_int(item.get("readTime"))
+        longest_books.append({
+            "source_id": source_id,
+            "title": (record.title if record else str(book.get("title") or "未命名书籍")),
+            "author": (record.author if record else str(book.get("author") or "")) or "",
+            "cover": (record.cover if record else str(book.get("cover") or "")) or "",
+            "read_seconds": read_seconds,
+            "read_duration": _seconds_to_duration(read_seconds),
+            "tags": _loads_json_list(record.tags_json) if record else [str(tag) for tag in item.get("tags", []) if tag],
+        })
+
+    return {
+        "total_read_seconds": total_read_seconds,
+        "total_read_duration": _seconds_to_duration(total_read_seconds),
+        "day_average_seconds": day_average_seconds,
+        "day_average_duration": _seconds_to_duration(day_average_seconds),
+        "read_days": read_days,
+        "active_days": active_days,
+        "compare": _safe_float(stats.get("compare")),
+        "book_count": len(records),
+        "note_count": sum(item.note_count or 0 for item in records),
+        "read_distribution_word": str(stats.get("readDistributionWord") or ""),
+        "last_sync_at": state.last_success_at if state else None,
+        "daily": daily,
+        "categories": categories,
+        "longest_books": longest_books,
+    }
+
+
 def sync_state_to_dict(state: WeReadSyncState | None, cfg: Settings = settings) -> dict[str, Any]:
     return {
         "configured": bool((cfg.WEREAD_API_KEY or "").strip()),
@@ -478,6 +585,7 @@ __all__ = [
     "_fetch_all_notebooks",
     "_seconds_to_duration",
     "book_record_to_dict",
+    "book_time_stats_to_dict",
     "sync_state_to_dict",
     "sync_weread_records",
 ]

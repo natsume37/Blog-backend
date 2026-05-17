@@ -14,12 +14,14 @@ from app.schemas.record import (
     BookRecordDetailOut,
     BookRecordOut,
     BookRecordStatsOut,
+    BookTimeStatsOut,
     WeReadSyncResult,
     WeReadSyncStatusOut,
 )
 from app.services.weread import (
     _seconds_to_duration,
     book_record_to_dict,
+    book_time_stats_to_dict,
     sync_state_to_dict,
     sync_weread_records,
 )
@@ -75,6 +77,9 @@ def get_book_record_stats(db: Session = Depends(get_db)):
     average_rating = round((sum(rated) / len(rated)) / 10, 1) if rated else 0
 
     state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
+    time_stats = book_time_stats_to_dict(state, records)
+    if read_seconds <= 0:
+        read_seconds = time_stats["total_read_seconds"]
     data = BookRecordStatsOut(
         total=total,
         monthly_count=monthly_count,
@@ -86,6 +91,13 @@ def get_book_record_stats(db: Session = Depends(get_db)):
         last_sync_at=state.last_success_at if state else None,
     )
     return ResponseModel(code=200, data=data)
+
+
+@router.get("/books/time-stats", response_model=ResponseModel[BookTimeStatsOut])
+def get_book_time_stats(db: Session = Depends(get_db)):
+    records = _public_book_query(db).all()
+    state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
+    return ResponseModel(code=200, data=BookTimeStatsOut(**book_time_stats_to_dict(state, records)))
 
 
 @router.get("/books/{id}", response_model=ResponseModel[BookRecordDetailOut])

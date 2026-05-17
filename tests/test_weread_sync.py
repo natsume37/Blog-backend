@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -135,6 +136,48 @@ def test_sync_lock_release_only_deletes_own_token(monkeypatch) -> None:
 
     assert client.value == "new-owner"
     assert client.deleted is False
+
+
+def test_book_time_stats_uses_weread_readdata_without_leaking_private_books() -> None:
+    state = WeReadSyncState(
+        key="weread",
+        stats_json=json.dumps({
+            "readTimes": {"1777651200": 1800, "1777737600": 3600},
+            "totalReadTime": 5400,
+            "dayAverageReadTime": 2700,
+            "readDays": 2,
+            "compare": 0.25,
+            "preferCategory": [
+                {"categoryTitle": "经济", "parentCategoryTitle": "社科", "readingCount": 2, "readingTime": 3600},
+            ],
+            "readLongest": [
+                {"book": {"bookId": "public-book", "title": "Public"}, "readTime": 2400, "tags": ["经济"]},
+                {"book": {"bookId": "private-book", "title": "Private"}, "readTime": 3000, "tags": ["私密"]},
+                {"book": {"title": "No Source Id"}, "readTime": 1200, "tags": ["未知"]},
+            ],
+        }, ensure_ascii=False),
+    )
+    records = [
+        BookRecord(
+            source="weread",
+            source_id="public-book",
+            title="公开书",
+            author="作者",
+            is_in_shelf=True,
+            is_private=False,
+            note_count=3,
+            tags_json='["经济", "微信读书"]',
+        )
+    ]
+
+    stats = weread.book_time_stats_to_dict(state, records)
+
+    assert stats["total_read_seconds"] == 5400
+    assert stats["total_read_duration"] == "1小时30分钟"
+    assert stats["day_average_duration"] == "45分钟"
+    assert [item["read_seconds"] for item in stats["daily"]] == [1800, 3600]
+    assert stats["categories"][0]["percent"] == 67
+    assert [item["title"] for item in stats["longest_books"]] == ["公开书"]
 
 
 def test_weread_job_registration_requires_enabled_api_key(monkeypatch) -> None:

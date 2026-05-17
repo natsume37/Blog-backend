@@ -53,6 +53,50 @@ class BookRecordStatsOut(BaseModel):
     last_sync_at: Optional[datetime] = None
 
 
+class BookTimeSeriesPointOut(BaseModel):
+    timestamp: int
+    date: str
+    label: str
+    read_seconds: int
+    read_duration: str
+
+
+class BookTimeCategoryOut(BaseModel):
+    name: str
+    parent_name: str = ""
+    reading_count: int = 0
+    read_seconds: int
+    read_duration: str
+    percent: int
+
+
+class BookTimeBookOut(BaseModel):
+    source_id: str = ""
+    title: str
+    author: str = ""
+    cover: str = ""
+    read_seconds: int
+    read_duration: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class BookTimeStatsOut(BaseModel):
+    total_read_seconds: int
+    total_read_duration: str
+    day_average_seconds: int
+    day_average_duration: str
+    read_days: int
+    active_days: int
+    compare: float = 0
+    book_count: int
+    note_count: int
+    read_distribution_word: str = ""
+    last_sync_at: Optional[datetime] = None
+    daily: list[BookTimeSeriesPointOut] = Field(default_factory=list)
+    categories: list[BookTimeCategoryOut] = Field(default_factory=list)
+    longest_books: list[BookTimeBookOut] = Field(default_factory=list)
+
+
 class WeReadSyncStatusOut(BaseModel):
     configured: bool
     enabled: bool
