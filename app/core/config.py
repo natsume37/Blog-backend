@@ -5,7 +5,7 @@
 import os
 from pathlib import Path
 from typing import Literal
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -140,6 +140,13 @@ class Settings(BaseSettings):
         default='https://api.ip2location.io/?ip={ip}',
         description='GeoIP 提供方 URL，支持 {ip} 占位符'
     )
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def normalize_string_env_values(cls, value):
+        if isinstance(value, str):
+            return value.strip().lstrip("\ufeff")
+        return value
 
     # 允许从 .env 文件读取，同时忽略多余字段
     model_config = SettingsConfigDict(
