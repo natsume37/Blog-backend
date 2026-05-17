@@ -85,3 +85,9 @@ def test_invalid_record_visibility_is_rejected() -> None:
         assert exc.status_code == 400
     else:
         raise AssertionError("invalid visibility should be rejected")
+
+
+def test_missing_visibility_defaults_to_admin_only() -> None:
+    assert records._normalize_visibility(None) == "private"
+    assert records._can_view_visibility(None, None) is False
+    assert records._can_view_visibility(None, _user(is_admin=True)) is True

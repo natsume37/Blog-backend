@@ -366,10 +366,10 @@ def sync_weread_records(db: Session, cfg: Settings = settings, force_notes: bool
             if not record:
                 color, accent = _stable_cover_colors(book_id)
                 record = BookRecord(source="weread", source_id=book_id, color=color, accent=accent)
-                record.visibility = "private" if is_secret else "public"
+                record.visibility = "private"
                 db.add(record)
             elif record.visibility not in {"public", "login", "private"}:
-                record.visibility = "private" if is_secret else "public"
+                record.visibility = "private"
 
             tags = [str(item.get("category") or "").strip(), "微信读书"]
             if note_count > 0:
@@ -453,7 +453,7 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
         "note_summary": record.note_summary or "",
         "color": record.color or "#2f6c8f",
         "accent": record.accent or "#224c4a",
-        "visibility": record.visibility or "public",
+        "visibility": record.visibility or "private",
         "is_private": bool(record.is_private),
         "last_read_at": record.last_read_at,
         "finished_at": record.finished_at,

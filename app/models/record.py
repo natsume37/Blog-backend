@@ -34,7 +34,7 @@ class BookRecord(Base):
     color = Column(String(20), default="#2f6c8f")
     accent = Column(String(20), default="#224c4a")
 
-    visibility = Column(String(20), default="public", nullable=False, index=True)
+    visibility = Column(String(20), default="private", nullable=False, index=True)
     is_private = Column(Boolean, default=False, nullable=False)
     is_top = Column(Boolean, default=False, nullable=False)
     is_in_shelf = Column(Boolean, default=True, nullable=False, index=True)
@@ -67,7 +67,7 @@ class MovieRecord(Base):
     tags_json = Column(Text, default="[]")
     color = Column(String(20), default="#2f5d7c")
     accent = Column(String(20), default="#d6a35d")
-    visibility = Column(String(20), default="public", nullable=False, index=True)
+    visibility = Column(String(20), default="private", nullable=False, index=True)
     is_top = Column(Boolean, default=False, nullable=False)
     watched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

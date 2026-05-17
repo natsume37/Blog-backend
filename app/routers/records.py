@@ -37,14 +37,14 @@ VISIBILITY_VALUES = {"public", "login", "private"}
 
 
 def _normalize_visibility(value: str | None) -> str:
-    normalized = (value or "public").strip().lower()
+    normalized = (value or "private").strip().lower()
     if normalized not in VISIBILITY_VALUES:
         raise HTTPException(status_code=400, detail="可见性只能是 public/login/private")
     return normalized
 
 
 def _can_view_visibility(visibility: str | None, current_user: User | None) -> bool:
-    normalized = (visibility or "public").strip().lower()
+    normalized = (visibility or "private").strip().lower()
     if current_user and current_user.is_admin:
         return True
     if normalized == "private":
@@ -55,7 +55,7 @@ def _can_view_visibility(visibility: str | None, current_user: User | None) -> b
 
 
 def _raise_visibility_denied(visibility: str | None) -> None:
-    if (visibility or "public").strip().lower() == "login":
+    if (visibility or "private").strip().lower() == "login":
         raise HTTPException(status_code=401, detail="请先登录后查看记录")
     raise HTTPException(status_code=403, detail="记录仅管理员可见")
 
@@ -122,7 +122,7 @@ def _movie_record_to_dict(record: MovieRecord) -> dict:
         "tags": _loads_json_list(record.tags_json),
         "color": record.color or "#2f5d7c",
         "accent": record.accent or "#d6a35d",
-        "visibility": record.visibility or "public",
+        "visibility": record.visibility or "private",
         "is_top": bool(record.is_top),
         "watched_at": record.watched_at,
     }
@@ -171,8 +171,8 @@ def get_book_record_stats(
     average_rating = round((sum(rated) / len(rated)) / 10, 1) if rated else 0
 
     state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
-    include_breakdowns = _all_book_records_visible(db, current_user, total)
-    time_stats = book_time_stats_to_dict(state, records, include_breakdowns=include_breakdowns)
+    can_use_global_stats = _all_book_records_visible(db, current_user, total)
+    time_stats = book_time_stats_to_dict(state if can_use_global_stats else None, records)
     if read_seconds <= 0:
         read_seconds = time_stats["total_read_seconds"]
     data = BookRecordStatsOut(
@@ -195,10 +195,11 @@ def get_book_time_stats(
 ):
     records = _visible_book_query(db, current_user).all()
     state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
-    include_breakdowns = _all_book_records_visible(db, current_user, len(records))
+    if not _all_book_records_visible(db, current_user, len(records)):
+        state = None
     return ResponseModel(
         code=200,
-        data=BookTimeStatsOut(**book_time_stats_to_dict(state, records, include_breakdowns=include_breakdowns)),
+        data=BookTimeStatsOut(**book_time_stats_to_dict(state, records)),
     )
 
 

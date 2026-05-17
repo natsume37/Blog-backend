@@ -32,7 +32,7 @@ class BookRecordOut(BaseModel):
     note_summary: str = ""
     color: str
     accent: str
-    visibility: str = "public"
+    visibility: str = "private"
     is_private: bool = False
     last_read_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -71,7 +71,7 @@ class MovieRecordOut(BaseModel):
     tags: list[str]
     color: str
     accent: str
-    visibility: str = "public"
+    visibility: str = "private"
     is_top: bool = False
     watched_at: Optional[datetime] = None
 
