@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default="", description='JWT密钥')
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    FRONTEND_BASE_URL: str | None = Field(default=None, description='前端站点地址，用于第三方登录回跳')
+    GITHUB_CLIENT_ID: str | None = Field(default=None, description='GitHub OAuth App Client ID')
+    GITHUB_CLIENT_SECRET: str | None = Field(default=None, description='GitHub OAuth App Client Secret')
+    GITHUB_REDIRECT_URI: str | None = Field(default=None, description='GitHub OAuth App Callback URL')
+    GITHUB_OAUTH_SCOPE: str = Field(default="read:user user:email", description='GitHub OAuth 授权范围')
     
     # CORS & Referer
     CORS_ORIGINS: list[str] = Field(default=["http://localhost:5173"], description="允许的跨域来源")

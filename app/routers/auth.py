@@ -1,10 +1,18 @@
 from fastapi import APIRouter, Depends, Response, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import logging
+import json
+import re
+import secrets
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request as UrlRequest, urlopen
 
 from app.core.database import get_db
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.user import User
@@ -18,6 +26,13 @@ import string
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 logger = logging.getLogger(__name__)
+
+GITHUB_STATE_COOKIE = "github_oauth_state"
+GITHUB_STATE_COOKIE_PATH = f"{settings.API_V1_PREFIX}/auth"
+GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
+GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_USER_URL = "https://api.github.com/user"
+GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 
 
 def _get_client_ip(request: Request) -> str:
@@ -57,6 +72,183 @@ def _record_login_log(
         db.rollback()
         logger.warning("Record login log failed: %s", e)
 
+
+def _set_auth_cookie(response: Response, access_token: str) -> None:
+    max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=max_age,
+        path="/",
+    )
+
+
+def _user_info(user: User) -> UserInfo:
+    return UserInfo(
+        id=user.id,
+        username=user.username,
+        nickname=user.nickname or user.username,
+        avatar=user.avatar or "",
+        email=user.email,
+        intro=user.intro or "",
+        is_admin=user.is_admin,
+        created_at=user.created_at,
+    )
+
+
+def _safe_frontend_path(value: str | None) -> str:
+    if not value:
+        return "/"
+    path = value.strip()
+    if not path.startswith("/") or path.startswith("//"):
+        return "/"
+    if "\r" in path or "\n" in path:
+        return "/"
+    return path
+
+
+def _frontend_url(path: str) -> str:
+    safe_path = _safe_frontend_path(path)
+    base = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        return safe_path
+    return f"{base}{safe_path}"
+
+
+def _github_callback_url(request: Request) -> str:
+    configured = (settings.GITHUB_REDIRECT_URI or "").strip()
+    if configured:
+        return configured
+    return str(request.url_for("github_oauth_callback"))
+
+
+def _github_failure_redirect(message: str) -> RedirectResponse:
+    url = _frontend_url(f"/login?github_error={quote(message)}")
+    response = RedirectResponse(url=url, status_code=303)
+    response.delete_cookie(key=GITHUB_STATE_COOKIE, path=GITHUB_STATE_COOKIE_PATH)
+    return response
+
+
+def _http_json(
+    url: str,
+    *,
+    method: str = "GET",
+    data: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any] | list[dict[str, Any]]:
+    payload = None
+    request_headers = headers.copy() if headers else {}
+    if data is not None:
+        payload = urlencode(data).encode("utf-8")
+        request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    request_headers.setdefault("Accept", "application/json")
+    request = UrlRequest(url, data=payload, headers=request_headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError) as exc:
+        raise RuntimeError("GitHub request failed") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("GitHub returned invalid JSON") from exc
+    if not isinstance(parsed, (dict, list)):
+        raise RuntimeError("GitHub returned unexpected response")
+    return parsed
+
+
+def _primary_verified_email(emails: list[dict[str, Any]]) -> str | None:
+    for item in emails:
+        if item.get("primary") and item.get("verified") and item.get("email"):
+            return str(item["email"])
+    for item in emails:
+        if item.get("verified") and item.get("email"):
+            return str(item["email"])
+    return None
+
+
+def _fallback_github_email(github_id: str) -> str:
+    return f"github-{github_id}@users.noreply.github.local"
+
+
+def _unique_github_email(db: Session, github_id: str, preferred: str | None) -> str:
+    candidate = preferred if preferred and len(preferred) <= 100 else None
+    if candidate and not db.query(User).filter(User.email == candidate).first():
+        return candidate
+    fallback = _fallback_github_email(github_id)
+    if not db.query(User).filter(User.email == fallback).first():
+        return fallback
+    return f"github-{github_id}-{secrets.token_hex(3)}@users.noreply.github.local"
+
+
+def _unique_username(db: Session, login: str | None, github_id: str) -> str:
+    raw = (login or f"github_{github_id}").strip().lower()
+    slug = re.sub(r"[^a-z0-9_]+", "_", raw).strip("_")
+    if not slug:
+        slug = f"github_{github_id}"
+    if not slug.startswith("github_"):
+        slug = f"github_{slug}"
+    base = slug[:42].rstrip("_") or f"github_{github_id}"
+    for index in range(100):
+        suffix = "" if index == 0 else f"_{index}"
+        candidate = f"{base[:50 - len(suffix)]}{suffix}"
+        if not db.query(User).filter(User.username == candidate).first():
+            return candidate
+    return f"github_{github_id}_{secrets.token_hex(3)}"[:50]
+
+
+def _get_or_create_github_user(
+    db: Session,
+    github_user: dict[str, Any],
+    verified_email: str | None,
+) -> User:
+    github_id = str(github_user.get("id") or "").strip()
+    if not github_id:
+        raise ValueError("GitHub user id missing")
+
+    login = str(github_user.get("login") or "").strip()
+    avatar = str(github_user.get("avatar_url") or "").strip()
+    display_name = str(github_user.get("name") or login or "").strip()
+    public_email = str(github_user.get("email") or "").strip() or None
+
+    user = db.query(User).filter(User.github_id == github_id).first()
+    if user is None and verified_email:
+        user = db.query(User).filter(User.email == verified_email).first()
+        if user is not None:
+            if user.github_id and user.github_id != github_id:
+                raise ValueError("GitHub email already linked to another account")
+            user.github_id = github_id
+
+    if user is None:
+        email = _unique_github_email(db, github_id, verified_email or public_email)
+        user = User(
+            username=_unique_username(db, login, github_id),
+            email=email,
+            hashed_password=get_password_hash(secrets.token_urlsafe(32)),
+            nickname=(display_name or login or "GitHub User")[:50],
+            avatar=avatar[:500],
+            intro="",
+            github_id=github_id,
+            github_login=login[:100],
+            is_active=True,
+            is_admin=False,
+        )
+        db.add(user)
+    else:
+        user.github_login = login[:100]
+        if not user.avatar and avatar:
+            user.avatar = avatar[:500]
+        if not user.nickname and display_name:
+            user.nickname = display_name[:50]
+
+    db.commit()
+    db.refresh(user)
+    return user
+
 # 随机头像生成函数
 def generate_random_avatar() -> str:
     """生成随机头像URL，使用 DiceBear API"""
@@ -89,33 +281,115 @@ def login(user_data: UserLogin, request: Request, response: Response, db: Sessio
     logger.info(f"User logged in: {user.username}")
     _record_login_log(db, request, user.username, True, "登录成功", user.id)
 
-    max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=settings.is_production,
-        samesite="lax",
-        max_age=max_age,
-        path="/"
-    )
-    
-    user_info = UserInfo(
-        id=user.id,
-        username=user.username,
-        nickname=user.nickname or user.username,
-        avatar=user.avatar,
-        email=user.email,
-        intro=user.intro,
-        is_admin=user.is_admin,
-        created_at=user.created_at
-    )
+    _set_auth_cookie(response, access_token)
+    user_info = _user_info(user)
     
     return ResponseModel(
         code=200,
         data=Token(token=access_token, userInfo=user_info),
         msg="登录成功"
     )
+
+
+@router.get("/github/authorize")
+def github_oauth_authorize(request: Request, redirect: str = "/"):
+    """跳转到 GitHub OAuth 授权页"""
+    if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
+        return _github_failure_redirect("GitHub 登录未配置")
+
+    redirect_path = _safe_frontend_path(redirect)
+    nonce = secrets.token_urlsafe(24)
+    state = create_access_token(
+        data={"nonce": nonce, "redirect": redirect_path},
+        expires_delta=timedelta(minutes=10),
+    )
+    query = urlencode({
+        "client_id": settings.GITHUB_CLIENT_ID,
+        "redirect_uri": _github_callback_url(request),
+        "scope": settings.GITHUB_OAUTH_SCOPE,
+        "state": state,
+        "allow_signup": "true",
+    })
+    response = RedirectResponse(url=f"{GITHUB_AUTHORIZE_URL}?{query}", status_code=303)
+    response.set_cookie(
+        key=GITHUB_STATE_COOKIE,
+        value=nonce,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=600,
+        path=GITHUB_STATE_COOKIE_PATH,
+    )
+    return response
+
+
+@router.get("/github/callback", name="github_oauth_callback")
+def github_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """处理 GitHub OAuth 回调并写入站点登录 Cookie"""
+    if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
+        return _github_failure_redirect("GitHub 登录未配置")
+    if not code or not state:
+        _record_login_log(db, request, "github", False, "GitHub 回调参数缺失")
+        return _github_failure_redirect("GitHub 登录参数无效")
+
+    state_payload = decode_access_token(state)
+    expected_nonce = request.cookies.get(GITHUB_STATE_COOKIE)
+    if not state_payload or state_payload.get("nonce") != expected_nonce:
+        _record_login_log(db, request, "github", False, "GitHub state 校验失败")
+        return _github_failure_redirect("GitHub 登录状态已失效，请重试")
+    redirect_path = _safe_frontend_path(str(state_payload.get("redirect") or "/"))
+
+    try:
+        token_response = _http_json(
+            GITHUB_TOKEN_URL,
+            method="POST",
+            data={
+                "client_id": settings.GITHUB_CLIENT_ID,
+                "client_secret": settings.GITHUB_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": _github_callback_url(request),
+            },
+        )
+        if not isinstance(token_response, dict) or not token_response.get("access_token"):
+            raise RuntimeError("GitHub token missing")
+        github_token = str(token_response["access_token"])
+        auth_headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        github_user = _http_json(GITHUB_USER_URL, headers=auth_headers)
+        if not isinstance(github_user, dict):
+            raise RuntimeError("GitHub user missing")
+        try:
+            github_emails = _http_json(GITHUB_EMAILS_URL, headers=auth_headers)
+        except RuntimeError:
+            github_emails = []
+        verified_email = _primary_verified_email(github_emails if isinstance(github_emails, list) else [])
+        user = _get_or_create_github_user(db, github_user, verified_email)
+    except Exception as exc:
+        logger.warning("GitHub OAuth login failed: %s", exc)
+        _record_login_log(db, request, "github", False, "GitHub 登录失败")
+        return _github_failure_redirect("GitHub 登录失败，请稍后重试")
+
+    if not user.is_active:
+        _record_login_log(db, request, user.username, False, "账号已被禁用", user.id)
+        return _github_failure_redirect("账号已被禁用")
+
+    access_token = create_access_token(
+        data={"sub": str(user.id)},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    response = RedirectResponse(url=_frontend_url(redirect_path), status_code=303)
+    _set_auth_cookie(response, access_token)
+    response.delete_cookie(key=GITHUB_STATE_COOKIE, path=GITHUB_STATE_COOKIE_PATH)
+    _record_login_log(db, request, user.username, True, "GitHub 登录成功", user.id)
+    return response
 
 
 @router.post("/logout", response_model=ResponseModel)
@@ -130,16 +404,7 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息 (验证 token 是否有效)"""
     return ResponseModel(
         code=200,
-        data=UserInfo(
-            id=current_user.id,
-            username=current_user.username,
-            nickname=current_user.nickname or current_user.username,
-            avatar=current_user.avatar,
-            email=current_user.email,
-            intro=current_user.intro,
-            is_admin=current_user.is_admin,
-            created_at=current_user.created_at
-        )
+        data=_user_info(current_user),
     )
 
 
@@ -238,16 +503,7 @@ def update_profile(
     
     return ResponseModel(
         code=200,
-        data=UserInfo(
-            id=current_user.id,
-            username=current_user.username,
-            nickname=current_user.nickname or current_user.username,
-            avatar=current_user.avatar or "",
-            email=current_user.email,
-            intro=current_user.intro or "",
-            is_admin=current_user.is_admin,
-            created_at=current_user.created_at
-        ),
+        data=_user_info(current_user),
         msg="更新成功"
     )
 

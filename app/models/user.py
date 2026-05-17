@@ -13,6 +13,8 @@ class User(Base):
     nickname = Column(String(50), default="")
     avatar = Column(String(500), default="")
     intro = Column(String(255), default="")
+    github_id = Column(String(64), unique=True, index=True, nullable=True)
+    github_login = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
