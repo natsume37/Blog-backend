@@ -46,7 +46,7 @@ def upgrade() -> None:
         sa.Column("reading_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("price", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("pay_type", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("soldout", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("soldout", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("search_keyword", sa.String(length=255), nullable=True),
         sa.Column("raw_json", sa.Text(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=True),
