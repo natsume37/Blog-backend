@@ -46,6 +46,12 @@ jobs:
         DATABASE_MAX_OVERFLOW=10
         REDIS_URL=${{ secrets.REDIS_URL }}
 
+        # --- 微信读书同步 ---
+        WEREAD_API_KEY=${{ secrets.WEREAD_API_KEY }}
+        WEREAD_SYNC_ENABLED=true
+        WEREAD_SYNC_INTERVAL_MINUTES=30
+        WEREAD_SKILL_VERSION=1.0.3
+
         # --- 日志 ---
         LOG_LEVEL=INFO
         LOG_FILE_PATH=./logs
