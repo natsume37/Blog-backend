@@ -171,8 +171,8 @@ def get_book_record_stats(
     average_rating = round((sum(rated) / len(rated)) / 10, 1) if rated else 0
 
     state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
-    can_use_global_stats = _all_book_records_visible(db, current_user, total)
-    time_stats = book_time_stats_to_dict(state if can_use_global_stats else None, records)
+    include_breakdowns = _all_book_records_visible(db, current_user, total)
+    time_stats = book_time_stats_to_dict(state, records, include_breakdowns=include_breakdowns)
     if read_seconds <= 0:
         read_seconds = time_stats["total_read_seconds"]
     data = BookRecordStatsOut(
@@ -195,9 +195,11 @@ def get_book_time_stats(
 ):
     records = _visible_book_query(db, current_user).all()
     state = db.query(WeReadSyncState).filter(WeReadSyncState.key == "weread").first()
-    if not _all_book_records_visible(db, current_user, len(records)):
-        state = None
-    return ResponseModel(code=200, data=BookTimeStatsOut(**book_time_stats_to_dict(state, records)))
+    include_breakdowns = _all_book_records_visible(db, current_user, len(records))
+    return ResponseModel(
+        code=200,
+        data=BookTimeStatsOut(**book_time_stats_to_dict(state, records, include_breakdowns=include_breakdowns)),
+    )
 
 
 @router.get("/books/{id}", response_model=ResponseModel[BookRecordDetailOut])

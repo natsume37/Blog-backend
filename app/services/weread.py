@@ -483,7 +483,11 @@ def _load_sync_stats(state: WeReadSyncState | None) -> dict[str, Any]:
         return {}
 
 
-def book_time_stats_to_dict(state: WeReadSyncState | None, records: list[BookRecord]) -> dict[str, Any]:
+def book_time_stats_to_dict(
+    state: WeReadSyncState | None,
+    records: list[BookRecord],
+    include_breakdowns: bool = True,
+) -> dict[str, Any]:
     stats = _load_sync_stats(state)
     record_read_seconds = sum(item.read_seconds or 0 for item in records)
     record_by_source_id = {item.source_id: item for item in records if item.source_id}
@@ -512,7 +516,7 @@ def book_time_stats_to_dict(state: WeReadSyncState | None, records: list[BookRec
         day_average_seconds = total_read_seconds // read_days
 
     categories = []
-    category_items = stats.get("preferCategory") if isinstance(stats.get("preferCategory"), list) else []
+    category_items = stats.get("preferCategory") if include_breakdowns and isinstance(stats.get("preferCategory"), list) else []
     for item in category_items[:8]:
         if not isinstance(item, dict):
             continue
@@ -528,7 +532,7 @@ def book_time_stats_to_dict(state: WeReadSyncState | None, records: list[BookRec
         })
 
     longest_books = []
-    longest_items = stats.get("readLongest") if isinstance(stats.get("readLongest"), list) else []
+    longest_items = stats.get("readLongest") if include_breakdowns and isinstance(stats.get("readLongest"), list) else []
     for item in longest_items[:8]:
         if not isinstance(item, dict):
             continue

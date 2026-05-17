@@ -229,6 +229,31 @@ def test_book_time_stats_uses_weread_readdata_without_leaking_private_books() ->
     assert [item["title"] for item in stats["longest_books"]] == ["公开书"]
 
 
+def test_book_time_stats_can_hide_breakdowns_while_keeping_aggregate_time() -> None:
+    state = WeReadSyncState(
+        key="weread",
+        stats_json=json.dumps({
+            "readTimes": {"1777651200": 1800},
+            "totalReadTime": 1800,
+            "dayAverageReadTime": 1800,
+            "readDays": 1,
+            "preferCategory": [
+                {"categoryTitle": "私密分类", "readingCount": 1, "readingTime": 1800},
+            ],
+            "readLongest": [
+                {"book": {"bookId": "private-book", "title": "Private"}, "readTime": 1800},
+            ],
+        }, ensure_ascii=False),
+    )
+
+    stats = weread.book_time_stats_to_dict(state, [], include_breakdowns=False)
+
+    assert stats["total_read_seconds"] == 1800
+    assert stats["daily"][0]["read_seconds"] == 1800
+    assert stats["categories"] == []
+    assert stats["longest_books"] == []
+
+
 def test_weread_job_registration_requires_enabled_api_key(monkeypatch) -> None:
     monkeypatch.setattr(jobs.settings, "WEREAD_SYNC_ENABLED", True)
     monkeypatch.setattr(jobs.settings, "WEREAD_API_KEY", "")
