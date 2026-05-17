@@ -54,6 +54,11 @@ jobs:
         SECRET_KEY=${{ secrets.SECRET_KEY }}
         ALGORITHM=HS256
         ACCESS_TOKEN_EXPIRE_MINUTES=10080
+        FRONTEND_BASE_URL=${{ secrets.OAUTH_FRONTEND_BASE_URL }}
+        GITHUB_CLIENT_ID=${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+        GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+        GITHUB_REDIRECT_URI=${{ secrets.OAUTH_GITHUB_REDIRECT_URI }}
+        GITHUB_OAUTH_SCOPE=read:user user:email
 
         # --- 邮件服务 ---
         SMTP_HOST=${{ secrets.SMTP_HOST }}
