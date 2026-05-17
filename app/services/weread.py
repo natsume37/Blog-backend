@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.cache import redis_client
 from app.core.config import Settings, settings
-from app.models.record import BookNoteSummary, BookRecord, WeReadSyncState
+from app.models.record import BookNoteCache, BookNoteSummary, BookRecord, BookSearchCache, WeReadSyncState
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,22 @@ def _safe_float(value: Any) -> float:
         return 0
 
 
+def _rating_to_five(value: Any) -> float:
+    score = _safe_float(value)
+    if score <= 0:
+        return 0
+    return round(min(score, 100) / 20, 1)
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    try:
+        return bool(int(value or 0))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
 def _stable_cover_colors(seed: str) -> tuple[str, str]:
     palettes = [
         ("#c66b3d", "#224c4a"),
@@ -116,6 +132,24 @@ def _stable_cover_colors(seed: str) -> tuple[str, str]:
     ]
     digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
     return palettes[int(digest[:2], 16) % len(palettes)]
+
+
+def _reading_link(book_id: str, chapter_uid: str | None = None) -> str:
+    if not book_id:
+        return ""
+    if chapter_uid:
+        return f"weread://reading?bId={book_id}&chapterUid={chapter_uid}"
+    return f"weread://reading?bId={book_id}"
+
+
+def _bookmark_link(book_id: str, chapter_uid: str | None, raw_range: str | None, user_vid: str | None = None) -> str:
+    if not (book_id and chapter_uid and raw_range and "-" in raw_range):
+        return ""
+    start, end = raw_range.split("-", 1)
+    link = f"weread://bestbookmark?bookId={book_id}&chapterUid={chapter_uid}&rangeStart={start}&rangeEnd={end}"
+    if user_vid:
+        link = f"{link}&userVid={user_vid}"
+    return link
 
 
 def _status_from_progress(progress: int, finish_reading: bool, last_read_at: datetime | None) -> str:
@@ -247,6 +281,447 @@ def _fetch_note_summaries(client: WeReadGatewayClient, book_id: str, limit: int 
         logger.info("Skip review summaries for %s: %s", book_id, exc)
 
     return summaries, rating
+
+
+def _normalize_search_book(item: dict[str, Any], keyword: str = "", from_cache: bool = False) -> dict[str, Any]:
+    book = item.get("bookInfo") if isinstance(item.get("bookInfo"), dict) else item
+    rating_raw = item.get("newRating", book.get("newRating"))
+    rating_count = item.get("newRatingCount", book.get("newRatingCount"))
+    rating_detail = item.get("newRatingDetail", book.get("newRatingDetail")) or {}
+    if isinstance(rating_detail, dict) and not rating_count:
+        rating_count = rating_detail.get("count")
+    return {
+        "source_id": str(book.get("bookId") or item.get("bookId") or "").strip(),
+        "title": str(book.get("title") or item.get("title") or "未命名书籍"),
+        "author": str(book.get("author") or item.get("author") or ""),
+        "translator": str(book.get("translator") or ""),
+        "cover": str(book.get("cover") or item.get("cover") or ""),
+        "intro": str(book.get("intro") or item.get("intro") or ""),
+        "category": str(book.get("category") or item.get("category") or ""),
+        "publisher": str(book.get("publisher") or ""),
+        "publish_time": str(book.get("publishTime") or book.get("publish_time") or ""),
+        "isbn": str(book.get("isbn") or ""),
+        "word_count": _safe_int(book.get("wordCount")),
+        "rating": _rating_to_five(rating_raw),
+        "rating_count": _safe_int(rating_count),
+        "reading_count": _safe_int(item.get("readingCount", book.get("readingCount"))),
+        "price": _safe_int(book.get("price")),
+        "pay_type": _safe_int(book.get("payType")),
+        "soldout": _parse_bool(book.get("soldout")),
+        "source": "weread",
+        "from_cache": from_cache,
+        "_keyword": keyword,
+        "_rating_raw": _safe_int(rating_raw),
+        "_raw": item,
+    }
+
+
+def _search_cache_to_dict(cache: BookSearchCache) -> dict[str, Any]:
+    return {
+        "source_id": cache.source_id,
+        "title": cache.title,
+        "author": cache.author or "",
+        "translator": cache.translator or "",
+        "cover": cache.cover or "",
+        "intro": cache.intro or "",
+        "category": cache.category or "",
+        "publisher": cache.publisher or "",
+        "publish_time": cache.publish_time or "",
+        "isbn": cache.isbn or "",
+        "word_count": cache.word_count or 0,
+        "rating": _rating_to_five(cache.rating),
+        "rating_count": cache.rating_count or 0,
+        "reading_count": cache.reading_count or 0,
+        "price": cache.price or 0,
+        "pay_type": cache.pay_type or 0,
+        "soldout": bool(cache.soldout),
+        "source": cache.source or "weread",
+        "from_cache": True,
+    }
+
+
+def _cache_search_book(db: Session, item: dict[str, Any]) -> None:
+    source_id = item.get("source_id")
+    if not source_id:
+        return
+    cache = db.query(BookSearchCache).filter(BookSearchCache.source_id == source_id).first()
+    if not cache:
+        cache = BookSearchCache(source_id=source_id)
+        db.add(cache)
+    cache.source = "weread"
+    cache.title = item.get("title") or "未命名书籍"
+    cache.author = item.get("author") or ""
+    cache.translator = item.get("translator") or ""
+    cache.cover = item.get("cover") or ""
+    cache.intro = item.get("intro") or ""
+    cache.category = item.get("category") or ""
+    cache.publisher = item.get("publisher") or ""
+    cache.publish_time = item.get("publish_time") or ""
+    cache.isbn = item.get("isbn") or ""
+    cache.word_count = _safe_int(item.get("word_count"))
+    cache.rating = _safe_int(item.get("_rating_raw")) or round(_safe_float(item.get("rating")) * 20)
+    cache.rating_count = _safe_int(item.get("rating_count"))
+    cache.reading_count = _safe_int(item.get("reading_count"))
+    cache.price = _safe_int(item.get("price"))
+    cache.pay_type = _safe_int(item.get("pay_type"))
+    cache.soldout = bool(item.get("soldout"))
+    cache.search_keyword = item.get("_keyword") or cache.search_keyword or ""
+    cache.raw_json = json.dumps(item.get("_raw") or {}, ensure_ascii=False)
+
+
+def _local_search_fallback(db: Session, keyword: str, limit: int) -> list[dict[str, Any]]:
+    kw = keyword.strip()
+    if not kw:
+        return []
+    cache_query = db.query(BookSearchCache).filter(
+        (BookSearchCache.title.contains(kw))
+        | (BookSearchCache.author.contains(kw))
+        | (BookSearchCache.category.contains(kw))
+        | (BookSearchCache.intro.contains(kw))
+        | (BookSearchCache.search_keyword.contains(kw))
+    )
+    cached = [_search_cache_to_dict(item) for item in cache_query.order_by(BookSearchCache.updated_at.desc()).limit(limit).all()]
+    seen = {item["source_id"] for item in cached}
+
+    record_query = db.query(BookRecord).filter(
+        BookRecord.source == "weread",
+        BookRecord.is_in_shelf == True,
+        (BookRecord.title.contains(kw))
+        | (BookRecord.author.contains(kw))
+        | (BookRecord.category.contains(kw))
+        | (BookRecord.note_summary.contains(kw))
+        | (BookRecord.tags_json.contains(kw)),
+    )
+    for record in record_query.order_by(BookRecord.last_read_at.desc(), BookRecord.updated_at.desc()).limit(limit).all():
+        if record.source_id in seen:
+            continue
+        cached.append({
+            "source_id": record.source_id,
+            "title": record.title,
+            "author": record.author or "",
+            "cover": record.cover or "",
+            "intro": record.intro or record.note_summary or "",
+            "category": record.category or "",
+            "publisher": record.publisher or "",
+            "publish_time": record.publish_time or "",
+            "isbn": record.isbn or "",
+            "word_count": record.word_count or 0,
+            "rating": _rating_to_five(record.weread_rating or record.rating * 10),
+            "rating_count": record.weread_rating_count or 0,
+            "reading_count": 0,
+            "price": 0,
+            "pay_type": 0,
+            "soldout": False,
+            "source": "weread",
+            "from_cache": True,
+        })
+        seen.add(record.source_id)
+        if len(cached) >= limit:
+            break
+    return cached[:limit]
+
+
+def search_weread_books(
+    db: Session,
+    cfg: Settings,
+    keyword: str,
+    scope: int = 10,
+    count: int = 12,
+    max_idx: int = 0,
+) -> tuple[list[dict[str, Any]], str]:
+    keyword = keyword.strip()
+    if not keyword:
+        return [], "请输入搜索关键词"
+    try:
+        client = WeReadGatewayClient(cfg)
+        data = client.call("/store/search", keyword=keyword, scope=scope, count=count, maxIdx=max_idx)
+        results = data.get("results") if isinstance(data.get("results"), list) else []
+        books: list[dict[str, Any]] = []
+        for group in results:
+            if not isinstance(group, dict):
+                continue
+            for item in group.get("books") or []:
+                if not isinstance(item, dict):
+                    continue
+                normalized = _normalize_search_book(item, keyword=keyword)
+                if normalized["source_id"]:
+                    _cache_search_book(db, normalized)
+                    books.append(normalized)
+        db.commit()
+        return books[:count], "success"
+    except Exception as exc:
+        db.rollback()
+        logger.info("WeRead search fallback for %s: %s", keyword, exc)
+        cached = _local_search_fallback(db, keyword, count)
+        message = "微信读书搜索暂不可用，已展示本地缓存" if cached else f"微信读书搜索暂不可用: {exc}"
+        return cached, message
+
+
+def _record_detail_fields(record: BookRecord | None) -> dict[str, Any]:
+    if not record:
+        return {}
+    return {
+        "local_record_id": record.id,
+        "visibility": record.visibility or "private",
+        "progress": record.progress or 0,
+        "read_seconds": record.read_seconds or 0,
+        "read_duration": _seconds_to_duration(record.read_seconds),
+        "status": record.status or "待读",
+        "note_count": record.note_count or 0,
+        "highlight_count": record.highlight_count or 0,
+        "review_count": record.review_count or 0,
+        "bookmark_count": record.bookmark_count or 0,
+        "tags": _loads_json_list(record.tags_json),
+        "last_read_at": record.last_read_at,
+        "finished_at": record.finished_at,
+        "detail_synced_at": record.detail_synced_at,
+    }
+
+
+def _chapter_to_dict(book_id: str, item: dict[str, Any]) -> dict[str, Any]:
+    chapter_uid = str(item.get("chapterUid") or "")
+    return {
+        "chapter_uid": chapter_uid,
+        "chapter_idx": _safe_int(item.get("chapterIdx")),
+        "title": str(item.get("title") or ""),
+        "level": _safe_int(item.get("level")) or 1,
+        "word_count": _safe_int(item.get("wordCount")),
+        "update_time": _parse_timestamp(item.get("updateTime")),
+        "price": _safe_int(item.get("price")),
+        "paid": _parse_bool(item.get("paid")),
+        "deep_link": _reading_link(book_id, chapter_uid),
+    }
+
+
+def get_weread_book_detail(db: Session, cfg: Settings, book_id: str) -> tuple[dict[str, Any], str]:
+    book_id = book_id.strip()
+    record = db.query(BookRecord).filter(BookRecord.source == "weread", BookRecord.source_id == book_id).first()
+    cache = db.query(BookSearchCache).filter(BookSearchCache.source_id == book_id).first()
+    base = _search_cache_to_dict(cache) if cache else {
+        "source_id": book_id,
+        "title": record.title if record else "未命名书籍",
+        "author": record.author if record else "",
+        "cover": record.cover if record else "",
+        "intro": record.intro if record else "",
+        "category": record.category if record else "",
+        "publisher": record.publisher if record else "",
+        "publish_time": record.publish_time if record else "",
+        "isbn": record.isbn if record else "",
+        "word_count": record.word_count if record else 0,
+        "rating": _rating_to_five(record.weread_rating if record else 0),
+        "rating_count": record.weread_rating_count if record else 0,
+        "reading_count": 0,
+        "price": 0,
+        "pay_type": 0,
+        "soldout": False,
+        "source": "weread",
+        "from_cache": True,
+    }
+    base.update(_record_detail_fields(record))
+    base.setdefault("chapters", [])
+
+    try:
+        client = WeReadGatewayClient(cfg)
+        info = client.call("/book/info", bookId=book_id)
+        info_book = info.get("bookInfo") if isinstance(info.get("bookInfo"), dict) else info
+        normalized = _normalize_search_book(info_book, from_cache=False)
+        normalized["source_id"] = normalized["source_id"] or book_id
+        _cache_search_book(db, normalized)
+
+        progress_book: dict[str, Any] = {}
+        try:
+            progress_book = client.call("/book/getprogress", bookId=book_id).get("book") or {}
+        except WeReadGatewayError as exc:
+            logger.info("Skip detail progress for %s: %s", book_id, exc)
+        progress = max(0, min(100, _safe_int(progress_book.get("progress"))))
+        last_read_at = _parse_timestamp(progress_book.get("updateTime"))
+        finished_at = _parse_timestamp(progress_book.get("finishTime"))
+
+        chapters: list[dict[str, Any]] = []
+        try:
+            chapter_data = client.call("/book/chapterinfo", bookId=book_id)
+            chapters = [_chapter_to_dict(book_id, item) for item in chapter_data.get("chapters") or [] if isinstance(item, dict)]
+        except WeReadGatewayError as exc:
+            logger.info("Skip chapter detail for %s: %s", book_id, exc)
+
+        if record:
+            record.intro = normalized.get("intro") or record.intro
+            record.publisher = normalized.get("publisher") or record.publisher
+            record.publish_time = normalized.get("publish_time") or record.publish_time
+            record.isbn = normalized.get("isbn") or record.isbn
+            record.word_count = _safe_int(normalized.get("word_count")) or record.word_count
+            record.weread_rating = _safe_int(normalized.get("_rating_raw")) or record.weread_rating
+            record.weread_rating_count = _safe_int(normalized.get("rating_count")) or record.weread_rating_count
+            record.chapter_count = len(chapters) or record.chapter_count
+            record.detail_synced_at = datetime.now()
+            if progress_book:
+                record.progress = progress
+                record.read_seconds = _safe_int(progress_book.get("recordReadingTime")) or record.read_seconds
+                record.status = _status_from_progress(progress, bool(finished_at), last_read_at)
+                record.last_read_at = last_read_at or record.last_read_at
+                record.finished_at = finished_at or record.finished_at
+        db.commit()
+
+        detail = {**base, **normalized, **_record_detail_fields(record)}
+        detail.update({
+            "progress": progress if progress_book else detail.get("progress", 0),
+            "read_seconds": _safe_int(progress_book.get("recordReadingTime")) or detail.get("read_seconds", 0),
+            "read_duration": _seconds_to_duration(_safe_int(progress_book.get("recordReadingTime")) or detail.get("read_seconds", 0)),
+            "status": _status_from_progress(progress, bool(finished_at), last_read_at) if progress_book else detail.get("status", "待读"),
+            "last_read_at": last_read_at or detail.get("last_read_at"),
+            "finished_at": finished_at or detail.get("finished_at"),
+            "chapters": chapters,
+            "from_cache": False,
+        })
+        return detail, "success"
+    except Exception as exc:
+        db.rollback()
+        logger.info("WeRead detail fallback for %s: %s", book_id, exc)
+        base["from_cache"] = True
+        return base, "微信读书详情暂不可用，已展示本地缓存" if (record or cache) else f"微信读书详情暂不可用: {exc}"
+
+
+def _note_cache_to_dict(item: BookNoteCache) -> dict[str, Any]:
+    return {
+        "source_id": item.source_id,
+        "note_type": item.note_type,
+        "chapter_uid": item.chapter_uid or "",
+        "chapter_title": item.chapter_title or "",
+        "content": item.content or "",
+        "abstract": item.abstract or "",
+        "location_range": item.location_range or "",
+        "color_style": item.color_style or "",
+        "deep_link": item.deep_link or "",
+        "source_created_at": item.source_created_at,
+    }
+
+
+def _group_notes(book_id: str, title: str, items: list[dict[str, Any]], from_cache: bool) -> dict[str, Any]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in sorted(items, key=lambda value: value.get("source_created_at") or datetime.min, reverse=True):
+        key = (item.get("chapter_uid") or "", item.get("chapter_title") or "未分章节")
+        grouped.setdefault(key, []).append(item)
+    chapters = [
+        {"chapter_uid": key[0], "chapter_title": key[1], "items": value}
+        for key, value in grouped.items()
+    ]
+    return {
+        "source_id": book_id,
+        "title": title,
+        "total": len(items),
+        "highlight_count": len([item for item in items if item.get("note_type") == "highlight"]),
+        "review_count": len([item for item in items if item.get("note_type") == "review"]),
+        "from_cache": from_cache,
+        "chapters": chapters,
+    }
+
+
+def _cached_notes(db: Session, book_id: str) -> dict[str, Any]:
+    record = db.query(BookRecord).filter(BookRecord.source == "weread", BookRecord.source_id == book_id).first()
+    cache = db.query(BookSearchCache).filter(BookSearchCache.source_id == book_id).first()
+    rows = db.query(BookNoteCache).filter(BookNoteCache.source_book_id == book_id).order_by(BookNoteCache.source_created_at.desc()).all()
+    title = (record.title if record else "") or (cache.title if cache else "")
+    return _group_notes(book_id, title, [_note_cache_to_dict(item) for item in rows], True)
+
+
+def fetch_weread_book_notes(db: Session, cfg: Settings, book_id: str) -> tuple[dict[str, Any], str]:
+    book_id = book_id.strip()
+    record = db.query(BookRecord).filter(BookRecord.source == "weread", BookRecord.source_id == book_id).first()
+    try:
+        client = WeReadGatewayClient(cfg)
+        bookmark_data = client.call("/book/bookmarklist", bookId=book_id)
+        chapters = {
+            str(item.get("chapterUid")): str(item.get("title") or "")
+            for item in (bookmark_data.get("chapters") or [])
+            if isinstance(item, dict)
+        }
+        notes: list[dict[str, Any]] = []
+        for item in bookmark_data.get("updated") or []:
+            if not isinstance(item, dict):
+                continue
+            content = _truncate_text(item.get("markText"), limit=2000)
+            if not content:
+                continue
+            chapter_uid = str(item.get("chapterUid") or "")
+            raw_range = str(item.get("range") or "")
+            notes.append({
+                "source_id": str(item.get("bookmarkId") or f"bookmark:{chapter_uid}:{raw_range}"),
+                "note_type": "highlight",
+                "chapter_uid": chapter_uid,
+                "chapter_title": chapters.get(chapter_uid, ""),
+                "content": content,
+                "abstract": "",
+                "location_range": raw_range,
+                "color_style": str(item.get("colorStyle") or ""),
+                "deep_link": _bookmark_link(book_id, chapter_uid, raw_range, str(item.get("userVid") or "")),
+                "source_created_at": _parse_timestamp(item.get("createTime")),
+            })
+
+        synckey = 0
+        for _ in range(5):
+            review_data = client.call("/review/list/mine", bookid=book_id, count=50, synckey=synckey)
+            for item in review_data.get("reviews") or []:
+                review = item.get("review") if isinstance(item, dict) else None
+                if not isinstance(review, dict):
+                    continue
+                content = _truncate_text(review.get("content"), limit=2000)
+                if not content:
+                    continue
+                chapter_uid = str(review.get("chapterUid") or "")
+                raw_range = str(review.get("range") or "")
+                abstract = str(review.get("abstract") or "")
+                notes.append({
+                    "source_id": str(review.get("reviewId") or f"review:{review.get('createTime') or len(notes)}"),
+                    "note_type": "review",
+                    "chapter_uid": chapter_uid,
+                    "chapter_title": str(review.get("chapterName") or chapters.get(chapter_uid, "")),
+                    "content": content,
+                    "abstract": abstract,
+                    "location_range": raw_range,
+                    "color_style": "",
+                    "deep_link": _bookmark_link(book_id, chapter_uid, raw_range),
+                    "source_created_at": _parse_timestamp(review.get("createTime")),
+                })
+            if not review_data.get("hasMore"):
+                break
+            next_synckey = _safe_int(review_data.get("synckey"))
+            if next_synckey <= 0 or next_synckey == synckey:
+                break
+            synckey = next_synckey
+
+        db.query(BookNoteCache).filter(BookNoteCache.source_book_id == book_id).delete(synchronize_session=False)
+        now = datetime.now()
+        for note in notes:
+            db.add(BookNoteCache(
+                book_record_id=record.id if record else None,
+                source_book_id=book_id,
+                source_id=note["source_id"],
+                note_type=note["note_type"],
+                chapter_uid=note["chapter_uid"],
+                chapter_title=note["chapter_title"],
+                content=note["content"],
+                abstract=note["abstract"],
+                location_range=note["location_range"],
+                color_style=note["color_style"],
+                deep_link=note["deep_link"],
+                source_created_at=note["source_created_at"],
+                synced_at=now,
+            ))
+        if record:
+            record.highlight_count = len([item for item in notes if item["note_type"] == "highlight"])
+            record.review_count = len([item for item in notes if item["note_type"] == "review"])
+            record.note_count = record.highlight_count + record.review_count + (record.bookmark_count or 0)
+            record.note_summary = "；".join(item["content"] for item in notes[:2])
+        db.commit()
+        title = record.title if record else str((bookmark_data.get("book") or {}).get("title") or "")
+        return _group_notes(book_id, title, notes, False), "success"
+    except Exception as exc:
+        db.rollback()
+        logger.info("WeRead notes fallback for %s: %s", book_id, exc)
+        cached = _cached_notes(db, book_id)
+        if cached["total"] > 0:
+            return cached, "微信读书笔记暂不可用，已展示本地缓存"
+        return cached, f"微信读书笔记暂不可用: {exc}"
 
 
 def _get_sync_state(db: Session) -> WeReadSyncState:
@@ -439,6 +914,13 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
         "author": record.author or "",
         "cover": record.cover or "",
         "category": record.category or "",
+        "publisher": record.publisher or "",
+        "publish_time": record.publish_time or "",
+        "isbn": record.isbn or "",
+        "word_count": record.word_count or 0,
+        "weread_rating": _rating_to_five(record.weread_rating),
+        "weread_rating_count": record.weread_rating_count or 0,
+        "chapter_count": record.chapter_count or 0,
         "format": record.format or "微信读书",
         "status": record.status,
         "progress": record.progress or 0,
@@ -458,6 +940,7 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
         "last_read_at": record.last_read_at,
         "finished_at": record.finished_at,
         "synced_at": record.synced_at,
+        "detail_synced_at": record.detail_synced_at,
     }
     if include_notes:
         data["intro"] = record.intro or ""
@@ -471,6 +954,64 @@ def book_record_to_dict(record: BookRecord, include_notes: bool = False) -> dict
             for item in sorted(record.notes, key=lambda item: item.source_created_at or datetime.min, reverse=True)
         ]
     return data
+
+
+def build_local_book_recommendations(records: list[BookRecord], limit: int = 8) -> list[dict[str, Any]]:
+    tag_frequency: dict[str, int] = {}
+    category_frequency: dict[str, int] = {}
+    for record in records:
+        if record.category:
+            category_frequency[record.category] = category_frequency.get(record.category, 0) + 1
+        for tag in _loads_json_list(record.tags_json):
+            if tag and tag != "微信读书":
+                tag_frequency[tag] = tag_frequency.get(tag, 0) + 1
+
+    scored: list[tuple[float, BookRecord, str]] = []
+    for record in records:
+        rating = _rating_to_five(record.weread_rating) or (round((record.rating or 0) / 10, 1) if record.rating else 0)
+        tags = _loads_json_list(record.tags_json)
+        score = rating * 18
+        score += min(record.read_seconds or 0, 3600 * 30) / 3600
+        score += min(record.note_count or 0, 60) * 0.35
+        if 0 < (record.progress or 0) < 100:
+            score += 12
+        elif (record.progress or 0) >= 100:
+            score += 8
+        score += category_frequency.get(record.category or "", 0) * 1.6
+        score += sum(tag_frequency.get(tag, 0) for tag in tags[:3]) * 0.8
+
+        if 0 < (record.progress or 0) < 100:
+            reason = f"正在阅读到 {record.progress}%，延续当前阅读节奏"
+        elif rating >= 4.5:
+            reason = f"{rating} 分高评分，适合作为重点回顾"
+        elif record.note_count:
+            reason = f"已有 {record.note_count} 条笔记，适合继续整理思考"
+        elif record.category:
+            reason = f"匹配你常读的「{record.category}」分类"
+        else:
+            reason = "基于本地书架和阅读进度推荐"
+        scored.append((score, record, reason))
+
+    scored.sort(key=lambda item: (item[0], item[1].last_read_at or item[1].updated_at or datetime.min), reverse=True)
+    recommendations = []
+    for _, record, reason in scored[:limit]:
+        rating = _rating_to_five(record.weread_rating) or (round((record.rating or 0) / 10, 1) if record.rating else 0)
+        recommendations.append({
+            "source_id": record.source_id,
+            "title": record.title,
+            "author": record.author or "",
+            "cover": record.cover or "",
+            "category": record.category or "",
+            "rating": rating,
+            "rating_count": record.weread_rating_count or 0,
+            "progress": record.progress or 0,
+            "read_seconds": record.read_seconds or 0,
+            "read_duration": _seconds_to_duration(record.read_seconds),
+            "reason": reason,
+            "tags": _loads_json_list(record.tags_json),
+            "local_record_id": record.id,
+        })
+    return recommendations
 
 
 def _load_sync_stats(state: WeReadSyncState | None) -> dict[str, Any]:
@@ -596,6 +1137,10 @@ __all__ = [
     "_seconds_to_duration",
     "book_record_to_dict",
     "book_time_stats_to_dict",
+    "build_local_book_recommendations",
+    "fetch_weread_book_notes",
+    "get_weread_book_detail",
+    "search_weread_books",
     "sync_state_to_dict",
     "sync_weread_records",
 ]

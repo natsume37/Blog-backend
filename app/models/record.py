@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -18,6 +18,14 @@ class BookRecord(Base):
     cover = Column(String(500), default="")
     category = Column(String(120), default="")
     intro = Column(Text, default="")
+    publisher = Column(String(255), default="")
+    publish_time = Column(String(80), default="")
+    isbn = Column(String(80), default="")
+    word_count = Column(Integer, default=0, nullable=False)
+    weread_rating = Column(Integer, default=0, nullable=False)
+    weread_rating_count = Column(Integer, default=0, nullable=False)
+    chapter_count = Column(Integer, default=0, nullable=False)
+    detail_synced_at = Column(DateTime, nullable=True)
     format = Column(String(50), default="微信读书")
     status = Column(String(30), default="待读", nullable=False, index=True)
 
@@ -46,6 +54,60 @@ class BookRecord(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     notes = relationship("BookNoteSummary", back_populates="book", cascade="all, delete-orphan")
+    full_notes = relationship("BookNoteCache", back_populates="book", cascade="all, delete-orphan")
+
+
+class BookSearchCache(Base):
+    __tablename__ = "book_search_caches"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    source = Column(String(30), default="weread", nullable=False, index=True)
+    source_id = Column(String(80), nullable=False, unique=True, index=True)
+    title = Column(String(255), nullable=False)
+    author = Column(String(255), default="")
+    translator = Column(String(255), default="")
+    cover = Column(String(500), default="")
+    intro = Column(Text, default="")
+    category = Column(String(120), default="")
+    publisher = Column(String(255), default="")
+    publish_time = Column(String(80), default="")
+    isbn = Column(String(80), default="")
+    word_count = Column(Integer, default=0, nullable=False)
+    rating = Column(Integer, default=0, nullable=False)
+    rating_count = Column(Integer, default=0, nullable=False)
+    reading_count = Column(Integer, default=0, nullable=False)
+    price = Column(Integer, default=0, nullable=False)
+    pay_type = Column(Integer, default=0, nullable=False)
+    soldout = Column(Boolean, default=False, nullable=False)
+    search_keyword = Column(String(255), default="", index=True)
+    raw_json = Column(Text, default="{}")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BookNoteCache(Base):
+    __tablename__ = "book_note_caches"
+    __table_args__ = (
+        UniqueConstraint("source_book_id", "source_id", "note_type", name="uq_book_note_cache_source"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    book_record_id = Column(Integer, ForeignKey("book_records.id", ondelete="CASCADE"), nullable=True, index=True)
+    source = Column(String(30), default="weread", nullable=False, index=True)
+    source_book_id = Column(String(80), nullable=False, index=True)
+    source_id = Column(String(120), nullable=False, index=True)
+    note_type = Column(String(30), nullable=False, index=True)
+    chapter_uid = Column(String(80), default="", index=True)
+    chapter_title = Column(String(255), default="")
+    content = Column(Text, default="")
+    abstract = Column(Text, default="")
+    location_range = Column(String(80), default="")
+    color_style = Column(String(30), default="")
+    deep_link = Column(String(500), default="")
+    source_created_at = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    book = relationship("BookRecord", back_populates="full_notes")
 
 
 class MovieRecord(Base):

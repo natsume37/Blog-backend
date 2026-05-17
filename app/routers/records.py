@@ -11,9 +11,13 @@ from app.models.record import BookRecord, MovieRecord, WeReadSyncState
 from app.models.user import User
 from app.schemas.common import ResponseModel
 from app.schemas.record import (
+    BookNotesOut,
+    BookRecommendationOut,
     BookRecordDetailOut,
     BookRecordOut,
     BookRecordStatsOut,
+    BookSearchResultOut,
+    BookSourceDetailOut,
     BookTimeStatsOut,
     MovieRecordOut,
     MovieRecordStatsOut,
@@ -25,6 +29,10 @@ from app.services.weread import (
     _seconds_to_duration,
     book_record_to_dict,
     book_time_stats_to_dict,
+    build_local_book_recommendations,
+    fetch_weread_book_notes,
+    get_weread_book_detail,
+    search_weread_books,
     sync_state_to_dict,
     sync_weread_records,
 )
@@ -201,6 +209,52 @@ def get_book_time_stats(
         code=200,
         data=BookTimeStatsOut(**book_time_stats_to_dict(state, records)),
     )
+
+
+@router.get("/books/search", response_model=ResponseModel[list[BookSearchResultOut]])
+def search_book_store(
+    keyword: str = Query(..., min_length=1, description="搜索关键词"),
+    scope: int = Query(10, description="微信读书搜索 scope，默认电子书"),
+    count: int = Query(12, ge=1, le=30, description="返回数量"),
+    max_idx: int = Query(0, ge=0, description="翻页偏移"),
+    db: Session = Depends(get_db),
+    _current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    data, message = search_weread_books(db, settings, keyword, scope=scope, count=count, max_idx=max_idx)
+    return ResponseModel(code=200, msg=message, data=data)
+
+
+@router.get("/books/recommendations", response_model=ResponseModel[list[BookRecommendationOut]])
+def get_book_recommendations(
+    limit: int = Query(8, ge=1, le=20, description="推荐数量"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    records = _visible_book_query(db, current_user).all()
+    return ResponseModel(code=200, data=build_local_book_recommendations(records, limit=limit))
+
+
+@router.get("/books/source/{book_id}/detail", response_model=ResponseModel[BookSourceDetailOut])
+def get_book_source_detail(
+    book_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    record = _book_base_query(db).filter(BookRecord.source_id == book_id).first()
+    if record and not _can_view_visibility(record.visibility, current_user):
+        _raise_visibility_denied(record.visibility)
+    data, message = get_weread_book_detail(db, settings, book_id)
+    return ResponseModel(code=200, msg=message, data=data)
+
+
+@router.get("/books/source/{book_id}/notes", response_model=ResponseModel[BookNotesOut])
+def get_book_source_notes(
+    book_id: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_admin),
+):
+    data, message = fetch_weread_book_notes(db, settings, book_id)
+    return ResponseModel(code=200, msg=message, data=data)
 
 
 @router.get("/books/{id}", response_model=ResponseModel[BookRecordDetailOut])
