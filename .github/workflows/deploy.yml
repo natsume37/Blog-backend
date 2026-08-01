@@ -211,6 +211,12 @@ jobs:
         echo "Running database migrations in the new PostgreSQL container..."
         compose run --rm backend alembic upgrade head
 
+        # 首次从宿主机 systemd 迁移时，释放旧后端占用的 8090 端口。
+        if sudo -n systemctl cat fastapi-blog.service >/dev/null 2>&1; then
+            echo "Disabling legacy fastapi-blog.service..."
+            sudo -n systemctl disable --now fastapi-blog.service
+        fi
+
         compose up -d --remove-orphans backend
 
         backend_ready=0

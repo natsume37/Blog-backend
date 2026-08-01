@@ -1,12 +1,10 @@
-# syntax=docker/dockerfile:1
-
 FROM python:3.11-slim-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_NO_DEV=1
 
-WORKDIR /build
+WORKDIR /app
 
 # 使用 uv 锁定生产依赖，保证本地、CI 与服务器使用同一套环境。
 RUN pip install --no-cache-dir uv==0.11.26
@@ -28,12 +26,13 @@ WORKDIR /app
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --create-home app
 
-COPY --from=builder --chown=app:app /build/.venv /app/.venv
-COPY --from=builder --chown=app:app /build/app /app/app
-COPY --from=builder --chown=app:app /build/alembic /app/alembic
-COPY --from=builder --chown=app:app /build/alembic.ini /app/alembic.ini
-COPY --from=builder --chown=app:app /build/pyproject.toml /app/pyproject.toml
-COPY --from=builder --chown=app:app /build/uv.lock /app/uv.lock
+# 虚拟环境不可随意改绝对路径，否则 console script 的 shebang 仍指向构建阶段目录。
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/app /app/app
+COPY --from=builder --chown=app:app /app/alembic /app/alembic
+COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=app:app /app/pyproject.toml /app/pyproject.toml
+COPY --from=builder --chown=app:app /app/uv.lock /app/uv.lock
 
 RUN mkdir -p /app/logs && chown app:app /app/logs
 
