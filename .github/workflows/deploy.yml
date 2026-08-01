@@ -32,12 +32,20 @@ jobs:
         fi
 
         DOCKER_USE_SUDO=0
-        if ! docker info >/dev/null 2>&1; then
-            if sudo -n docker info >/dev/null 2>&1; then
-                DOCKER_USE_SUDO=1
-            else
-                echo "ERROR: Docker is unavailable for the deployment user."
-                exit 1
+        if ! docker info >/tmp/blog-docker-info.err 2>&1; then
+            # Docker CLI 已存在但 daemon 可能尚未启动，先尝试恢复服务。
+            sudo -n systemctl start docker >/tmp/blog-docker-start.err 2>&1 || true
+            if ! docker info >/tmp/blog-docker-info.err 2>&1; then
+                if sudo -n docker info >/tmp/blog-docker-sudo-info.err 2>&1; then
+                    DOCKER_USE_SUDO=1
+                else
+                    echo "ERROR: Docker daemon or permissions are unavailable."
+                    cat /tmp/blog-docker-info.err || true
+                    cat /tmp/blog-docker-start.err || true
+                    cat /tmp/blog-docker-sudo-info.err || true
+                    sudo -n systemctl status docker --no-pager || true
+                    exit 1
+                fi
             fi
         fi
 
