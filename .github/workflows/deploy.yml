@@ -49,6 +49,7 @@ jobs:
                 fi
             fi
         fi
+        echo "Docker daemon is ready (sudo=$DOCKER_USE_SUDO)."
 
         docker_cmd() {
             if [ "$DOCKER_USE_SUDO" -eq 1 ]; then
@@ -59,10 +60,25 @@ jobs:
         }
 
         mkdir -p "$DEPLOY_DIR"
-        test -s "$IMAGE_ARCHIVE"
-        test -s "$REMOTE_COMPOSE"
+        echo "Checking uploaded Docker bundle in $REMOTE_UPLOAD_DIR..."
+        ls -la "$REMOTE_UPLOAD_DIR"
+        if [ ! -s "$IMAGE_ARCHIVE" ]; then
+            echo "ERROR: Docker image archive is missing or empty: $IMAGE_ARCHIVE"
+            exit 1
+        fi
+        if [ ! -s "$REMOTE_COMPOSE" ]; then
+            echo "ERROR: Compose file is missing or empty: $REMOTE_COMPOSE"
+            exit 1
+        fi
+        echo "Loading Docker image bundle..."
         docker_cmd load < "$IMAGE_ARCHIVE"
+        echo "Docker image bundle loaded."
         cp "$REMOTE_COMPOSE" "$COMPOSE_FILE"
+
+        if ! docker_cmd compose version; then
+            echo "ERROR: Docker Compose plugin is unavailable."
+            exit 1
+        fi
 
         # 关键 Secret 预检查，避免启动容器后才发现生产配置缺失。
         if [ -z "${{ secrets.SECRET_KEY }}" ]; then
@@ -165,6 +181,7 @@ jobs:
         }
         trap rollback EXIT
 
+        echo "Starting PostgreSQL and Redis containers..."
         compose up -d db redis
 
         database_ready=0
