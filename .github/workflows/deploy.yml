@@ -175,8 +175,13 @@ jobs:
                 mv "$DEPLOY_DIR/.env.docker.tmp" "$DEPLOY_DIR/.env.docker"
                 compose up -d backend || true
             fi
-            rm -f "$IMAGE_ARCHIVE" "$REMOTE_COMPOSE"
-            rmdir "$REMOTE_UPLOAD_DIR" 2>/dev/null || true
+            # 失败时保留上传包，确保后续 SSH 重试仍可重新加载镜像；成功后再清理。
+            if [ "$code" -eq 0 ]; then
+                rm -f "$IMAGE_ARCHIVE" "$REMOTE_COMPOSE"
+                rmdir "$REMOTE_UPLOAD_DIR" 2>/dev/null || true
+            else
+                echo "Docker deployment failed; retaining $REMOTE_UPLOAD_DIR for retry diagnostics."
+            fi
             exit "$code"
         }
         trap rollback EXIT
