@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CommentCreate(BaseModel):
@@ -23,16 +23,16 @@ class CommentUpdate(BaseModel):
 
 class CommentUser(BaseModel):
     """评论用户信息"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     nickname: str
     avatar: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
-
 class CommentReply(BaseModel):
     """子评论（回复）响应"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     content: str
     user: CommentUser
@@ -41,12 +41,10 @@ class CommentReply(BaseModel):
     created_at: datetime
     is_liked: bool = False
 
-    class Config:
-        from_attributes = True
-
-
 class CommentResponse(BaseModel):
     """评论响应（包含回复列表）"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     content: str
     content_type: str = "article"
@@ -55,15 +53,13 @@ class CommentResponse(BaseModel):
     like_count: int = 0
     created_at: datetime
     is_liked: bool = False
-    replies: List[CommentReply] = []
+    replies: List[CommentReply] = Field(default_factory=list)
     reply_count: int = 0
-
-    class Config:
-        from_attributes = True
-
 
 class CommentAdminItem(BaseModel):
     """管理员评论列表项"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     content: str
     article_id: int
@@ -71,6 +67,3 @@ class CommentAdminItem(BaseModel):
     user: CommentUser
     is_approved: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True

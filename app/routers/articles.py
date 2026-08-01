@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 
 from app.core.database import get_db
-from app.core.deps import get_current_admin, get_current_user_optional
+from app.core.deps import (
+    get_current_admin,
+    get_current_user_optional,
+    require_public_interactions_enabled,
+)
 from app.core.cache import redis_client
 from app.models.article import Article, Category, Tag, article_tags, ArticleLike
 from app.models.article_version import ArticleVersion
@@ -745,7 +749,8 @@ def like_article(
     article_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """点赞文章（防止重复点赞）"""
     article = db.query(Article).filter(Article.id == article_id).first()
@@ -793,7 +798,8 @@ def unlike_article(
     article_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """取消点赞"""
     article = db.query(Article).filter(Article.id == article_id).first()

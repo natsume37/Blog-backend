@@ -52,7 +52,7 @@ def _find_referenced_articles(db: Session, key: str, url: str):
 def create_resource(
     resource_in: ResourceCreate,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User = Depends(get_current_admin),
 ):
     """记录新上传的资源"""
     # 检查key是否已存在
@@ -62,7 +62,7 @@ def create_resource(
     
     new_resource = Resource(
         **resource_in.model_dump(),
-        user_id=current_user.id if current_user else None
+        user_id=current_user.id,
     )
     db.add(new_resource)
     db.commit()

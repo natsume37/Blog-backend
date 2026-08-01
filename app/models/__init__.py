@@ -15,5 +15,38 @@ from app.models.tool_item import ToolItem
 from app.models.plugin import PluginInstall, PluginSetting
 from app.models.wechat_plugin import WechatBroadcastTask, WechatQrCodeRecord
 from app.models.record import BookNoteCache, BookRecord, BookSearchCache, BookNoteSummary, MovieRecord, WeReadSyncState
+from app.models.record_core import FocusSession, NoteRecord, RecordEntry, RecordTag, record_entry_tags
 
-__all__ = ["User", "Article", "Category", "Tag", "article_tags", "Message", "SiteInfo", "Comment", "VisitLog", "Changelog", "Resource", "AuditLog", "LoginLog", "ArticleVersion", "FriendLink", "ToolItem", "PluginInstall", "PluginSetting", "WechatBroadcastTask", "WechatQrCodeRecord", "BookNoteCache", "BookRecord", "BookSearchCache", "BookNoteSummary", "MovieRecord", "WeReadSyncState"]
+__all__ = [
+    "User",
+    "Article",
+    "Category",
+    "Tag",
+    "article_tags",
+    "Message",
+    "SiteInfo",
+    "Comment",
+    "VisitLog",
+    "Changelog",
+    "Resource",
+    "AuditLog",
+    "LoginLog",
+    "ArticleVersion",
+    "FriendLink",
+    "ToolItem",
+    "PluginInstall",
+    "PluginSetting",
+    "WechatBroadcastTask",
+    "WechatQrCodeRecord",
+    "BookNoteCache",
+    "BookRecord",
+    "BookSearchCache",
+    "BookNoteSummary",
+    "MovieRecord",
+    "WeReadSyncState",
+    "RecordEntry",
+    "RecordTag",
+    "NoteRecord",
+    "FocusSession",
+    "record_entry_tags",
+]

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FriendLinkBase(BaseModel):
@@ -31,6 +31,8 @@ class FriendLinkUpdate(FriendLinkCreate):
 
 
 class FriendLinkPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     url: str
@@ -41,11 +43,9 @@ class FriendLinkPublic(BaseModel):
     is_featured: bool = False
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
 class FriendLinkAdmin(FriendLinkBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sort_order: int = 0
     is_featured: bool = False
@@ -53,6 +53,3 @@ class FriendLinkAdmin(FriendLinkBase):
     review_note: str = ""
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

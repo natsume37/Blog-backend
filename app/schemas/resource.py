@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class ResourceBase(BaseModel):
@@ -14,12 +14,11 @@ class ResourceCreate(ResourceBase):
     pass
 
 class ResourceResponse(ResourceBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: Optional[int]
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 class ResourceList(BaseModel):
     total: int

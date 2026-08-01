@@ -14,7 +14,7 @@ from urllib.request import Request as UrlRequest, urlopen
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.core.config import settings
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_public_interactions_enabled
 from app.models.user import User
 from app.models.login_log import LoginLog
 from app.schemas.user import UserCreate, UserLogin, UserInfo, Token, UserUpdate, ForgotPasswordRequest, ResetPasswordRequest, UserRegister
@@ -205,6 +205,8 @@ def _get_or_create_github_user(
     db: Session,
     github_user: dict[str, Any],
     verified_email: str | None,
+    *,
+    allow_create: bool = True,
 ) -> User:
     github_id = str(github_user.get("id") or "").strip()
     if not github_id:
@@ -224,6 +226,8 @@ def _get_or_create_github_user(
             user.github_id = github_id
 
     if user is None:
+        if not allow_create:
+            raise PermissionError("Owner-only mode does not create GitHub users")
         email = _unique_github_email(db, github_id, verified_email or public_email)
         user = User(
             username=_unique_username(db, login, github_id),
@@ -271,6 +275,11 @@ def login(user_data: UserLogin, request: Request, response: Response, db: Sessio
         logger.warning(f"Login attempt for inactive user: {user_data.username}")
         _record_login_log(db, request, user.username, False, "账号已被禁用", user.id)
         return ResponseModel(code=403, msg="账号已被禁用")
+
+    if settings.OWNER_ONLY_MODE and not user.is_admin:
+        logger.warning("Owner-only login rejected for user: %s", user.username)
+        _record_login_log(db, request, user.username, False, "仅允许站长登录", user.id)
+        return ResponseModel(code=403, msg="这里只允许站长登录")
     
     # Create token
     access_token = create_access_token(
@@ -371,11 +380,20 @@ def github_oauth_callback(
         except RuntimeError:
             github_emails = []
         verified_email = _primary_verified_email(github_emails if isinstance(github_emails, list) else [])
-        user = _get_or_create_github_user(db, github_user, verified_email)
+        user = _get_or_create_github_user(
+            db,
+            github_user,
+            verified_email,
+            allow_create=not settings.OWNER_ONLY_MODE,
+        )
     except Exception as exc:
         logger.warning("GitHub OAuth login failed: %s", exc)
         _record_login_log(db, request, "github", False, "GitHub 登录失败")
         return _github_failure_redirect("GitHub 登录失败，请稍后重试")
+
+    if settings.OWNER_ONLY_MODE and not user.is_admin:
+        _record_login_log(db, request, user.username, False, "仅允许站长登录", user.id)
+        return _github_failure_redirect("这里只允许站长登录")
 
     if not user.is_active:
         _record_login_log(db, request, user.username, False, "账号已被禁用", user.id)
@@ -411,7 +429,8 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
 @router.post("/register/send-code", response_model=ResponseModel)
 def send_register_code(
     request: ForgotPasswordRequest,  # 复用 ForgotPasswordRequest (只包含 email)
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """发送注册验证码"""
     # Check if email exists
@@ -434,7 +453,11 @@ def send_register_code(
 
 
 @router.post("/register", response_model=ResponseModel)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+def register(
+    user_data: UserRegister,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_public_interactions_enabled),
+):
     """用户注册"""
     # Verify code
     redis_client = RedisClient()

@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     HOST: str = Field(default='0.0.0.0', description='服务器主机')
     PORT: int = Field(default=8000, description='服务器端口')
     API_V1_PREFIX: str = Field(default="/api/v1", description="API 路径前缀")
+    API_V2_PREFIX: str = Field(default="/api/v2", description="第二版 API 路径前缀")
 
     # ===========================
     # 数据库配置 (Database)
@@ -78,6 +79,8 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str | None = Field(default=None, description='GitHub OAuth App Client Secret')
     GITHUB_REDIRECT_URI: str | None = Field(default=None, description='GitHub OAuth App Callback URL')
     GITHUB_OAUTH_SCOPE: str = Field(default="read:user user:email", description='GitHub OAuth 授权范围')
+    OWNER_ONLY_MODE: bool = Field(default=True, description='是否仅允许站长账号登录')
+    PUBLIC_INTERACTIONS_ENABLED: bool = Field(default=False, description='是否允许访客提交评论、留言、点赞和申请')
     
     # CORS & Referer
     CORS_ORIGINS: list[str] = Field(default=["http://localhost:5173"], description="允许的跨域来源")

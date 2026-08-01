@@ -1,6 +1,6 @@
 from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryBase(BaseModel):
@@ -16,6 +16,8 @@ class CategoryCreate(CategoryBase):
 
 
 class CategoryResponse(CategoryBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sort_order: int
     article_count: int = 0  # 文章数量
@@ -25,10 +27,6 @@ class CategoryResponse(CategoryBase):
     banner_url: Optional[str] = None
     quote: Optional[str] = None
     quote_author: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
 
 class TagBase(BaseModel):
     name: str
@@ -40,12 +38,10 @@ class TagCreate(TagBase):
 
 
 class TagResponse(TagBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
 
 class ArticleBase(BaseModel):
     title: str
@@ -70,7 +66,7 @@ class ArticleBase(BaseModel):
 
 
 class ArticleCreate(ArticleBase):
-    tag_ids: Optional[List[int]] = []
+    tag_ids: Optional[List[int]] = Field(default_factory=list)
 
 
 class ArticleUpdate(BaseModel):
@@ -111,10 +107,12 @@ class ArticleWechatRenderRequest(BaseModel):
 class ArticleWechatRenderResponse(BaseModel):
     html: str
     plain_text: str = ""
-    warnings: List[str] = []
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ArticleListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     summary: Optional[str] = ""
@@ -125,11 +123,9 @@ class ArticleListItem(BaseModel):
     commentCount: int
     likeCount: int
 
-    class Config:
-        from_attributes = True
-
-
 class ArticleAdminListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     summary: str
@@ -146,11 +142,9 @@ class ArticleAdminListItem(BaseModel):
     is_protected: bool = False
     visibility: str = "public"
 
-    class Config:
-        from_attributes = True
-
-
 class ArticleDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     slug: Optional[str] = None
@@ -164,7 +158,7 @@ class ArticleDetail(BaseModel):
     createdAt: Optional[datetime] = None
     categoryName: Optional[str] = ""
     category: Optional[CategoryResponse] = None
-    tags: List[TagResponse] = []
+    tags: List[TagResponse] = Field(default_factory=list)
     viewCount: int
     commentCount: int
     likeCount: int
@@ -177,15 +171,10 @@ class ArticleDetail(BaseModel):
     is_protected: Optional[bool] = False
     protection_question: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
-
 class CategoryWithArticles(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     description: str
     articles: List[ArticleListItem]
-
-    class Config:
-        from_attributes = True

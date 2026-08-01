@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolItemBase(BaseModel):
@@ -29,6 +29,8 @@ class ToolItemUpdate(ToolItemCreate):
 
 
 class ToolItemPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     url: str
@@ -44,17 +46,12 @@ class ToolItemPublic(BaseModel):
     is_featured: bool = False
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
 class ToolItemAdmin(ToolItemBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sort_order: int = 0
     is_featured: bool = False
     status: str = "draft"
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

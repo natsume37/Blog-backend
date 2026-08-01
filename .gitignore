@@ -1,6 +1,7 @@
 # Environment
 .env
 .venv/
+.codegraph/
 __pycache__/
 *.pyc
 *.pyo

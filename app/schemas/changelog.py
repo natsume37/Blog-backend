@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ChangelogBase(BaseModel):
@@ -17,8 +17,7 @@ class ChangelogUpdate(ChangelogBase):
 
 
 class Changelog(ChangelogBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True

@@ -9,6 +9,13 @@ class BookRecord(Base):
     __tablename__ = "book_records"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    record_entry_id = Column(
+        Integer,
+        ForeignKey("record_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     source = Column(String(30), default="weread", nullable=False, index=True)
     source_id = Column(String(80), unique=True, nullable=False, index=True)
     source_type = Column(String(30), default="book", nullable=False)
@@ -55,6 +62,7 @@ class BookRecord(Base):
 
     notes = relationship("BookNoteSummary", back_populates="book", cascade="all, delete-orphan")
     full_notes = relationship("BookNoteCache", back_populates="book", cascade="all, delete-orphan")
+    record_entry = relationship("RecordEntry", back_populates="book")
 
 
 class BookSearchCache(Base):
@@ -114,6 +122,13 @@ class MovieRecord(Base):
     __tablename__ = "movie_records"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    record_entry_id = Column(
+        Integer,
+        ForeignKey("record_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     source = Column(String(30), default="manual", nullable=False, index=True)
     source_id = Column(String(80), unique=True, nullable=False, index=True)
 
@@ -134,6 +149,8 @@ class MovieRecord(Base):
     watched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    record_entry = relationship("RecordEntry", back_populates="movie")
 
 
 class BookNoteSummary(Base):
