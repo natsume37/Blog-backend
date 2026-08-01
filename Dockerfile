@@ -30,6 +30,7 @@ RUN groupadd --system --gid 10001 app \
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/app /app/app
 COPY --from=builder --chown=app:app /app/alembic /app/alembic
+COPY --from=builder --chown=app:app /app/scripts /app/scripts
 COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
 COPY --from=builder --chown=app:app /app/pyproject.toml /app/pyproject.toml
 COPY --from=builder --chown=app:app /app/uv.lock /app/uv.lock

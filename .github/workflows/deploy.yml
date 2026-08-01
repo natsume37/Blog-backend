@@ -208,7 +208,10 @@ jobs:
             exit 1
         fi
 
-        echo "Running database migrations in the new PostgreSQL container..."
+        echo "Bootstrapping PostgreSQL when the database is empty..."
+        compose run --rm backend python scripts/db/bootstrap_postgres.py
+
+        echo "Running database migrations in PostgreSQL..."
         compose run --rm backend alembic upgrade head
 
         # 首次从宿主机 systemd 迁移时，释放旧后端占用的 8090 端口。
