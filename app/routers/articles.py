@@ -556,6 +556,7 @@ def get_articles(
     tagId: Optional[int] = None,
     keyword: Optional[str] = None,
     sort: Optional[str] = "new",
+    include_protected: bool = Query(True, description="是否包含受保护文章"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ):
@@ -565,6 +566,10 @@ def get_articles(
         or_(Article.is_hidden == False, Article.is_hidden == None),
         or_(Article.visibility == "public", Article.visibility == None),
     )
+
+    if not include_protected:
+        # 公开归档与站点地图只收录无需额外验证即可阅读的文章。
+        query = query.filter(or_(Article.is_protected == False, Article.is_protected == None))
     
     # Filter by category
     if categoryId:
@@ -633,6 +638,7 @@ def get_articles(
 def get_article(
     article_id: int, 
     answer: Optional[str] = Query(None, description="验证答案"),
+    track_view: bool = Query(True, description="是否计入阅读量"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
     settings: Settings = Depends(get_settings)
@@ -662,10 +668,10 @@ def get_article(
             if not current_user:
                 return ResponseModel(code=401, msg="请先登录后查看文章")
             
-        # 增加阅读数 (简单实现，直接写库或 Redis)
-        # 这里为了简便，沿用之前的 Redis 逻辑或直接 +1
-        article.view_count += 1
-        db.commit()
+        # 静态预渲染会读取正文生成可索引 HTML，不能因此虚增真实阅读量。
+        if track_view:
+            article.view_count += 1
+            db.commit()
                 
         # 权限检查
         show_content = True
