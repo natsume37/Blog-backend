@@ -1,83 +1,68 @@
-name: Deploy Backend
+name: Deploy Backend (Docker)
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   DEPLOY_SSH_CONNECT_TIMEOUT: 30s
-  DEPLOY_COMMAND_TIMEOUT: 25m
+  DEPLOY_COMMAND_TIMEOUT: 30m
+  IMAGE_NAME: blog-backend
+  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_ARCHIVE: blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.images.tar.gz
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # 服务器无法访问 GitHub 时，通过 SSH 上传源码包完成部署。
-      BACKEND_ARCHIVE: blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz
       DEPLOY_SCRIPT: |
-        # 遇到错误立即停止
         set -euo pipefail
 
-        # 1. 通过 Actions 上传的源码包部署，避免服务器执行 git pull 访问 GitHub。
-        DEPLOY_DIR="$HOME/work/blog/Blog-backend"
-        ARCHIVE="/tmp/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz"
-        RELEASE_ROOT="$HOME/work/blog/.backend-releases"
-        BACKUP_ROOT="$HOME/work/blog/.backend-backups"
-        RELEASE_ID="${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}"
-        STAGING="$RELEASE_ROOT/$RELEASE_ID"
-        BACKUP="$BACKUP_ROOT/$RELEASE_ID"
-        BACKUP_ARCHIVE="$BACKUP/payload.tgz"
-        restore_needed=0
+        DEPLOY_DIR="$HOME/work/blog/Blog-backend-docker"
+        COMPOSE_FILE="$DEPLOY_DIR/compose.production.yml"
+        IMAGE_ARCHIVE="/tmp/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.images.tar.gz"
+        REMOTE_COMPOSE="/tmp/compose.production.yml"
+        IMAGE_REF="blog-backend:${{ github.sha }}"
+        PREVIOUS_IMAGE=""
 
-        rollback() {
-            local code=$?
-            if [ "$code" -ne 0 ] && [ "$restore_needed" -eq 1 ] && [ -f "$BACKUP_ARCHIVE" ]; then
-                echo "Deployment failed, restoring the previous backend source."
-                find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
-                    ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
-                    ! -name ".git" ! -name ".codegraph" -exec rm -rf {} +
-                tar -xzf "$BACKUP_ARCHIVE" -C "$DEPLOY_DIR"
-            fi
-            rm -rf "$STAGING"
-            if [ "$code" -eq 0 ]; then
-                rm -f "$ARCHIVE"
-            fi
-            exit "$code"
-        }
-        trap rollback EXIT
-
-        mkdir -p "$DEPLOY_DIR" "$STAGING" "$BACKUP"
-        test -s "$ARCHIVE"
-        tar -xzf "$ARCHIVE" -C "$STAGING"
-        test -f "$STAGING/pyproject.toml"
-
-        # 在替换源码前保留可回滚的旧版本，运行环境文件和虚拟环境不参与覆盖。
-        if find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
-            ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
-            ! -name ".git" ! -name ".codegraph" -print -quit | grep -q .; then
-            tar -C "$DEPLOY_DIR" \
-                --exclude=".env.prod" --exclude=".venv" --exclude="logs" \
-                --exclude=".git" --exclude=".codegraph" \
-                -czf "$BACKUP_ARCHIVE" .
+        if ! command -v docker >/dev/null 2>&1; then
+            echo "ERROR: Docker is not installed on the server."
+            exit 1
         fi
 
-        restore_needed=1
-        find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
-            ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
-            ! -name ".git" ! -name ".codegraph" -exec rm -rf {} +
-        cp -a "$STAGING"/. "$DEPLOY_DIR"/
-        cd "$DEPLOY_DIR"
+        DOCKER_USE_SUDO=0
+        if ! docker info >/dev/null 2>&1; then
+            if sudo -n docker info >/dev/null 2>&1; then
+                DOCKER_USE_SUDO=1
+            else
+                echo "ERROR: Docker is unavailable for the deployment user."
+                exit 1
+            fi
+        fi
 
-        # 1.1 关键 Secret 预检查（为空时直接失败，避免迁移阶段才报错）
+        docker_cmd() {
+            if [ "$DOCKER_USE_SUDO" -eq 1 ]; then
+                sudo -n docker "$@"
+            else
+                docker "$@"
+            fi
+        }
+
+        mkdir -p "$DEPLOY_DIR"
+        test -s "$IMAGE_ARCHIVE"
+        test -s "$REMOTE_COMPOSE"
+        docker_cmd load < "$IMAGE_ARCHIVE"
+        cp "$REMOTE_COMPOSE" "$COMPOSE_FILE"
+
+        # 关键 Secret 预检查，避免启动容器后才发现生产配置缺失。
         if [ -z "${{ secrets.SECRET_KEY }}" ]; then
             echo "ERROR: GitHub secret SECRET_KEY is missing or empty."
             exit 1
         fi
 
-        # 2. 注入环境变量 (从 GitHub Secrets)
-        echo "Generating .env.prod file..."
-        cat <<'EOF' > .env.prod.tmp
-        # --- 基础配置 ---
+        # 应用运行时配置由 GitHub Secrets 注入，数据库与 Redis 使用 Docker 内部服务名。
+        cat <<'EOF' > "$DEPLOY_DIR/.env.prod.tmp"
         APP_NAME=Blog-Backend
         APP_VERSION=1.0.0
         ENVIRONMENT=production
@@ -85,24 +70,18 @@ jobs:
         HOST=0.0.0.0
         PORT=8090
         API_V1_PREFIX=/api/v1
-
-        # --- 数据库 & Redis ---
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        DATABASE_URL=postgresql+psycopg://blog:docker-internal@db:5432/blog
         DATABASE_POOL_SIZE=20
         DATABASE_MAX_OVERFLOW=10
-        REDIS_URL=${{ secrets.REDIS_URL }}
-
-        # --- 微信读书同步 ---
+        REDIS_HOST=redis
+        REDIS_PORT=6379
+        REDIS_DB=0
         WEREAD_API_KEY=${{ secrets.WEREAD_API_KEY }}
         WEREAD_SYNC_ENABLED=true
         WEREAD_SYNC_INTERVAL_MINUTES=30
         WEREAD_SKILL_VERSION=1.0.3
-
-        # --- 日志 ---
         LOG_LEVEL=INFO
         LOG_FILE_PATH=./logs
-
-        # --- 安全 ---
         SECRET_KEY=${{ secrets.SECRET_KEY }}
         ALGORITHM=HS256
         ACCESS_TOKEN_EXPIRE_MINUTES=10080
@@ -111,89 +90,142 @@ jobs:
         GITHUB_CLIENT_SECRET=${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
         GITHUB_REDIRECT_URI=${{ secrets.OAUTH_GITHUB_REDIRECT_URI }}
         GITHUB_OAUTH_SCOPE=read:user user:email
-
-        # --- 邮件服务 ---
         SMTP_HOST=${{ secrets.SMTP_HOST }}
         SMTP_PORT=${{ secrets.SMTP_PORT }}
         SMTP_USER=${{ secrets.SMTP_USER }}
         SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
         EMAILS_FROM_EMAIL=${{ secrets.EMAILS_FROM_EMAIL }}
         EMAILS_FROM_NAME=${{ secrets.EMAILS_FROM_NAME }}
-
-        # --- 七牛云 ---
         QINIU_ACCESS_KEY=${{ secrets.QINIU_ACCESS_KEY }}
         QINIU_SECRET_KEY=${{ secrets.QINIU_SECRET_KEY }}
         QINIU_BUCKET=${{ secrets.QINIU_BUCKET }}
         QINIU_DOMAIN=${{ secrets.QINIU_DOMAIN }}
-
-        # --- 七牛云时间戳防盗链 ---
         QINIU_TIMESTAMP_ENABLED=${{ secrets.QINIU_TIMESTAMP_ENABLED }}
         QINIU_TIMESTAMP_KEY=${{ secrets.QINIU_TIMESTAMP_KEY }}
         QINIU_TIMESTAMP_EXPIRE=${{ secrets.QINIU_TIMESTAMP_EXPIRE }}
-        
-        # --- 安全加强 (防盗链) ---
-        # 请在 GitHub Secrets 中配置 CORS_ORIGINS 为 JSON 格式数组，例如: ["https://martin88.xyz", "https://www.martin88.xyz"]
         CORS_ORIGINS='${{ secrets.CORS_ORIGINS }}'
         ENABLE_REFERER_CHECK=${{ secrets.ENABLE_REFERER_CHECK }}
-
-        # --- GeoIP ---
         GEOIP_ENABLED=true
         GEOIP_PROVIDER_URL=https://api.ip2location.io/?ip={ip}
         EOF
-        chmod 600 .env.prod.tmp
-        mv .env.prod.tmp .env.prod
+        chmod 600 "$DEPLOY_DIR/.env.prod.tmp"
+        mv "$DEPLOY_DIR/.env.prod.tmp" "$DEPLOY_DIR/.env.prod"
 
-        # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
-        if ! command -v uv &> /dev/null; then
-            echo "Installing uv..."
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            source $HOME/.cargo/env
+        # 首次部署生成全新的数据库和 Redis 凭据；后续发布复用它们。
+        if [ ! -f "$DEPLOY_DIR/.env.docker" ]; then
+            if ! command -v openssl >/dev/null 2>&1; then
+                echo "ERROR: openssl is required to initialize Docker credentials."
+                exit 1
+            fi
+            POSTGRES_PASSWORD="$(openssl rand -hex 32)"
+            REDIS_PASSWORD="$(openssl rand -hex 32)"
+            cat <<EOF > "$DEPLOY_DIR/.env.docker"
+        POSTGRES_DB=blog
+        POSTGRES_USER=blog
+        POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+        REDIS_PASSWORD=$REDIS_PASSWORD
+        EOF
         fi
 
-        # 4. 同步依赖
-        # 生产环境仅同步运行依赖，避免 dev 依赖拖慢部署。
-        echo "Syncing dependencies..."
-        uv sync --frozen --no-dev
+        PREVIOUS_IMAGE="$(sed -n 's/^BACKEND_IMAGE=//p' "$DEPLOY_DIR/.env.docker" | tail -n 1 || true)"
+        grep -v '^BACKEND_IMAGE=' "$DEPLOY_DIR/.env.docker" > "$DEPLOY_DIR/.env.docker.tmp" || true
+        printf 'BACKEND_IMAGE=%s\n' "$IMAGE_REF" >> "$DEPLOY_DIR/.env.docker.tmp"
+        chmod 600 "$DEPLOY_DIR/.env.docker.tmp"
+        mv "$DEPLOY_DIR/.env.docker.tmp" "$DEPLOY_DIR/.env.docker"
 
-        # 5. 执行数据库迁移 (复用已同步的环境，不再触发额外 sync)
-        echo "Running database migrations..."
-        ENVIRONMENT=production uv run --frozen --no-sync --no-dev alembic upgrade head
+        set -a
+        . "$DEPLOY_DIR/.env.docker"
+        set +a
 
-        # 6. 重启服务
-        sudo systemctl restart fastapi-blog.service
+        compose() {
+            docker_cmd compose --env-file "$DEPLOY_DIR/.env.docker" -f "$COMPOSE_FILE" "$@"
+        }
 
-        echo "Deployment successful!"
+        rollback() {
+            local code=$?
+            if [ "$code" -ne 0 ] && [ -n "$PREVIOUS_IMAGE" ]; then
+                echo "Docker deployment failed, restoring previous image: $PREVIOUS_IMAGE"
+                grep -v '^BACKEND_IMAGE=' "$DEPLOY_DIR/.env.docker" > "$DEPLOY_DIR/.env.docker.tmp" || true
+                printf 'BACKEND_IMAGE=%s\n' "$PREVIOUS_IMAGE" >> "$DEPLOY_DIR/.env.docker.tmp"
+                mv "$DEPLOY_DIR/.env.docker.tmp" "$DEPLOY_DIR/.env.docker"
+                compose up -d backend || true
+            fi
+            rm -f "$IMAGE_ARCHIVE" "$REMOTE_COMPOSE"
+            exit "$code"
+        }
+        trap rollback EXIT
+
+        compose up -d db redis
+
+        database_ready=0
+        redis_ready=0
+        for _ in $(seq 1 30); do
+            if compose exec -T db pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+                database_ready=1
+            fi
+            if compose exec -T redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
+                redis_ready=1
+            fi
+            if [ "$database_ready" -eq 1 ] && [ "$redis_ready" -eq 1 ]; then
+                break
+            fi
+            sleep 2
+        done
+        if [ "$database_ready" -ne 1 ] || [ "$redis_ready" -ne 1 ]; then
+            echo "ERROR: Docker database or Redis did not become ready."
+            exit 1
+        fi
+
+        echo "Running database migrations in the new PostgreSQL container..."
+        compose run --rm backend alembic upgrade head
+
+        compose up -d --remove-orphans backend
+
+        backend_ready=0
+        for _ in $(seq 1 30); do
+            if compose exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/docs', timeout=3)" >/dev/null 2>&1; then
+                backend_ready=1
+                break
+            fi
+            sleep 2
+        done
+        if [ "$backend_ready" -ne 1 ]; then
+            compose logs --tail=80 backend
+            exit 1
+        fi
+
+        compose ps
+        echo "Docker deployment successful!"
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Pack backend source
+      - name: Build backend image bundle
         shell: bash
         run: |
-          tar \
-            --exclude='.git' \
-            --exclude='.venv' \
-            --exclude='.codegraph' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='*.pyo' \
-            -czf "$RUNNER_TEMP/$BACKEND_ARCHIVE" .
-          cp "$RUNNER_TEMP/$BACKEND_ARCHIVE" "$BACKEND_ARCHIVE"
+          set -euo pipefail
+          docker build --pull --tag "$IMAGE_NAME:$IMAGE_TAG" .
+          docker pull postgres:16-alpine
+          docker pull redis:7-alpine
+          docker save "$IMAGE_NAME:$IMAGE_TAG" postgres:16-alpine redis:7-alpine \
+            | gzip > "$RUNNER_TEMP/$IMAGE_ARCHIVE"
+          cp "$RUNNER_TEMP/$IMAGE_ARCHIVE" "$IMAGE_ARCHIVE"
+          test -s "$IMAGE_ARCHIVE"
 
-      - name: Upload backend source
+      - name: Upload Docker bundle
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: ${{ env.BACKEND_ARCHIVE }}
+          source: ${{ env.IMAGE_ARCHIVE }},compose.production.yml
           target: /tmp
           timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
           overwrite: true
 
-      - name: Deploy to Server via SSH (Attempt 1)
+      - name: Deploy Docker bundle via SSH (Attempt 1)
         id: deploy_1
         continue-on-error: true
         uses: appleboy/ssh-action@v1.0.3
@@ -206,11 +238,11 @@ jobs:
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
           script: ${{ env.DEPLOY_SCRIPT }}
 
-      - name: Wait Before Retry 2
+      - name: Wait before retry 2
         if: steps.deploy_1.outcome == 'failure'
         run: sleep 15
 
-      - name: Deploy to Server via SSH (Attempt 2)
+      - name: Deploy Docker bundle via SSH (Attempt 2)
         if: steps.deploy_1.outcome == 'failure'
         id: deploy_2
         continue-on-error: true
@@ -224,11 +256,11 @@ jobs:
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
           script: ${{ env.DEPLOY_SCRIPT }}
 
-      - name: Wait Before Retry 3
+      - name: Wait before retry 3
         if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
         run: sleep 15
 
-      - name: Deploy to Server via SSH (Attempt 3)
+      - name: Deploy Docker bundle via SSH (Attempt 3)
         if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
         id: deploy_3
         continue-on-error: true
@@ -242,8 +274,8 @@ jobs:
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
           script: ${{ env.DEPLOY_SCRIPT }}
 
-      - name: Fail When All Deploy Attempts Failed
+      - name: Fail when all Docker deploy attempts fail
         if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure' && steps.deploy_3.outcome == 'failure'
         run: |
-          echo "Backend deploy failed after 3 SSH attempts."
+          echo "Docker backend deploy failed after 3 SSH attempts."
           exit 1
