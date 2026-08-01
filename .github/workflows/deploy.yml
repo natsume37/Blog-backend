@@ -171,6 +171,7 @@ jobs:
         shell: bash
         run: |
           tar \
+            --exclude="$BACKEND_ARCHIVE" \
             --exclude='.git' \
             --exclude='.venv' \
             --exclude='.codegraph' \
