@@ -12,12 +12,61 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
+      # 服务器无法访问 GitHub 时，通过 SSH 上传源码包完成部署。
+      BACKEND_ARCHIVE: blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz
       DEPLOY_SCRIPT: |
         # 遇到错误立即停止
         set -euo pipefail
 
-        # 1. 进入项目目录
-        cd ~/work/blog/Blog-backend
+        # 1. 通过 Actions 上传的源码包部署，避免服务器执行 git pull 访问 GitHub。
+        DEPLOY_DIR="$HOME/work/blog/Blog-backend"
+        ARCHIVE="/tmp/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz"
+        RELEASE_ROOT="$HOME/work/blog/.backend-releases"
+        BACKUP_ROOT="$HOME/work/blog/.backend-backups"
+        RELEASE_ID="${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}"
+        STAGING="$RELEASE_ROOT/$RELEASE_ID"
+        BACKUP="$BACKUP_ROOT/$RELEASE_ID"
+        BACKUP_ARCHIVE="$BACKUP/payload.tgz"
+        restore_needed=0
+
+        rollback() {
+            local code=$?
+            if [ "$code" -ne 0 ] && [ "$restore_needed" -eq 1 ] && [ -f "$BACKUP_ARCHIVE" ]; then
+                echo "Deployment failed, restoring the previous backend source."
+                find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
+                    ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
+                    ! -name ".git" ! -name ".codegraph" -exec rm -rf {} +
+                tar -xzf "$BACKUP_ARCHIVE" -C "$DEPLOY_DIR"
+            fi
+            rm -rf "$STAGING"
+            if [ "$code" -eq 0 ]; then
+                rm -f "$ARCHIVE"
+            fi
+            exit "$code"
+        }
+        trap rollback EXIT
+
+        mkdir -p "$DEPLOY_DIR" "$STAGING" "$BACKUP"
+        test -s "$ARCHIVE"
+        tar -xzf "$ARCHIVE" -C "$STAGING"
+        test -f "$STAGING/pyproject.toml"
+
+        # 在替换源码前保留可回滚的旧版本，运行环境文件和虚拟环境不参与覆盖。
+        if find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
+            ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
+            ! -name ".git" ! -name ".codegraph" -print -quit | grep -q .; then
+            tar -C "$DEPLOY_DIR" \
+                --exclude=".env.prod" --exclude=".venv" --exclude="logs" \
+                --exclude=".git" --exclude=".codegraph" \
+                -czf "$BACKUP_ARCHIVE" .
+        fi
+
+        restore_needed=1
+        find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 \
+            ! -name ".env.prod" ! -name ".venv" ! -name "logs" \
+            ! -name ".git" ! -name ".codegraph" -exec rm -rf {} +
+        cp -a "$STAGING"/. "$DEPLOY_DIR"/
+        cd "$DEPLOY_DIR"
 
         # 1.1 关键 Secret 预检查（为空时直接失败，避免迁移阶段才报错）
         if [ -z "${{ secrets.SECRET_KEY }}" ]; then
@@ -25,12 +74,9 @@ jobs:
             exit 1
         fi
 
-        # 2. 拉取最新代码
-        git pull origin main
-
-        # 2.1 注入环境变量 (从 GitHub Secrets)
+        # 2. 注入环境变量 (从 GitHub Secrets)
         echo "Generating .env.prod file..."
-        cat <<'EOF' > .env.prod
+        cat <<'EOF' > .env.prod.tmp
         # --- 基础配置 ---
         APP_NAME=Blog-Backend
         APP_VERSION=1.0.0
@@ -94,6 +140,8 @@ jobs:
         GEOIP_ENABLED=true
         GEOIP_PROVIDER_URL=https://api.ip2location.io/?ip={ip}
         EOF
+        chmod 600 .env.prod.tmp
+        mv .env.prod.tmp .env.prod
 
         # 3. 确保 uv 已安装 (如果服务器是新的，这步会自动安装)
         if ! command -v uv &> /dev/null; then
@@ -116,6 +164,34 @@ jobs:
 
         echo "Deployment successful!"
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Pack backend source
+        shell: bash
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='.venv' \
+            --exclude='.codegraph' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            -czf "$BACKEND_ARCHIVE" .
+
+      - name: Upload backend source
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: ${{ env.BACKEND_ARCHIVE }}
+          target: /tmp
+          timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
+          command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
+          overwrite: true
+
       - name: Deploy to Server via SSH (Attempt 1)
         id: deploy_1
         continue-on-error: true
