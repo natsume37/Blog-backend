@@ -14,6 +14,7 @@ jobs:
     env:
       # 服务器无法访问 GitHub 时，通过 SSH 上传源码包完成部署。
       BACKEND_ARCHIVE: blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz
+      BACKEND_ARCHIVE_PATH: ${{ runner.temp }}/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.tgz
       DEPLOY_SCRIPT: |
         # 遇到错误立即停止
         set -euo pipefail
@@ -171,14 +172,13 @@ jobs:
         shell: bash
         run: |
           tar \
-            --exclude="$BACKEND_ARCHIVE" \
             --exclude='.git' \
             --exclude='.venv' \
             --exclude='.codegraph' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
             --exclude='*.pyo' \
-            -czf "$BACKEND_ARCHIVE" .
+            -czf "$BACKEND_ARCHIVE_PATH" .
 
       - name: Upload backend source
         uses: appleboy/scp-action@v0.1.7
@@ -187,7 +187,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: ${{ env.BACKEND_ARCHIVE }}
+          source: ${{ env.BACKEND_ARCHIVE_PATH }}
           target: /tmp
           timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
