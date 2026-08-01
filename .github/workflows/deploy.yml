@@ -21,8 +21,9 @@ jobs:
 
         DEPLOY_DIR="$HOME/work/blog/Blog-backend-docker"
         COMPOSE_FILE="$DEPLOY_DIR/compose.production.yml"
-        IMAGE_ARCHIVE="/tmp/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.images.tar.gz"
-        REMOTE_COMPOSE="/tmp/compose.production.yml"
+        REMOTE_UPLOAD_DIR="/tmp/blog-backend-deploy-${{ github.run_id }}-${{ github.run_attempt }}"
+        IMAGE_ARCHIVE="$REMOTE_UPLOAD_DIR/blog-backend-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}.images.tar.gz"
+        REMOTE_COMPOSE="$REMOTE_UPLOAD_DIR/compose.production.yml"
         IMAGE_REF="blog-backend:${{ github.sha }}"
         PREVIOUS_IMAGE=""
 
@@ -159,6 +160,7 @@ jobs:
                 compose up -d backend || true
             fi
             rm -f "$IMAGE_ARCHIVE" "$REMOTE_COMPOSE"
+            rmdir "$REMOTE_UPLOAD_DIR" 2>/dev/null || true
             exit "$code"
         }
         trap rollback EXIT
@@ -228,7 +230,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           source: ${{ env.IMAGE_ARCHIVE }},compose.production.yml
-          target: /tmp
+          target: /tmp/blog-backend-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
           overwrite: true
