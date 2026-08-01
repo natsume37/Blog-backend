@@ -178,6 +178,7 @@ jobs:
             --exclude='*.pyc' \
             --exclude='*.pyo' \
             -czf "$RUNNER_TEMP/$BACKEND_ARCHIVE" .
+          cp "$RUNNER_TEMP/$BACKEND_ARCHIVE" "$BACKEND_ARCHIVE"
 
       - name: Upload backend source
         uses: appleboy/scp-action@v0.1.7
@@ -186,7 +187,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: ${{ runner.temp }}/${{ env.BACKEND_ARCHIVE }}
+          source: ${{ env.BACKEND_ARCHIVE }}
           target: /tmp
           timeout: ${{ env.DEPLOY_SSH_CONNECT_TIMEOUT }}
           command_timeout: ${{ env.DEPLOY_COMMAND_TIMEOUT }}
