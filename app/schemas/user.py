@@ -1,6 +1,6 @@
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class UserBase(BaseModel):
@@ -18,6 +18,8 @@ class UserLogin(BaseModel):
 
 
 class UserInfo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     nickname: str
@@ -27,10 +29,6 @@ class UserInfo(BaseModel):
     is_admin: bool = False
     is_active: bool = True
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
 
 class Token(BaseModel):
     token: str

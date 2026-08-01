@@ -84,6 +84,24 @@ def test_github_user_without_verified_email_does_not_take_existing_email() -> No
     assert user.is_admin is False
 
 
+def test_owner_only_github_login_does_not_create_accounts() -> None:
+    db = _session()
+
+    try:
+        auth._get_or_create_github_user(
+            db,
+            {"id": 789, "login": "visitor"},
+            None,
+            allow_create=False,
+        )
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("owner-only mode must not create GitHub accounts")
+
+    assert db.query(User).count() == 0
+
+
 def test_verified_email_link_rejects_different_existing_github_id() -> None:
     db = _session()
     db.add(User(

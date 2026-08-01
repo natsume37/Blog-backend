@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_current_admin, get_optional_current_user
+from app.core.deps import (
+    get_current_admin,
+    get_current_user,
+    get_optional_current_user,
+    require_public_interactions_enabled,
+)
 from app.models.user import User
 from app.models.article import Article, CommentLike
 from app.models.comment import Comment
@@ -106,7 +111,8 @@ def create_comment(
     comment_in: CommentCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """创建评论（需登录）- 支持多种内容类型"""
     # 验证内容类型
@@ -330,7 +336,8 @@ def get_comments_by_content(
 def delete_comment(
     comment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """删除评论（只能删除自己的评论，管理员可删除任何评论）"""
     comment = db.query(Comment).filter(Comment.id == comment_id).first()
@@ -365,7 +372,8 @@ def like_comment(
     comment_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """点赞评论（防止重复点赞）"""
     comment = db.query(Comment).filter(Comment.id == comment_id).first()

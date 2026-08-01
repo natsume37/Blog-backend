@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import require_public_interactions_enabled
 from app.models.message import Message
 from app.schemas.message import MessageCreate, MessageResponse
 from app.schemas.common import ResponseModel, PagedData
@@ -47,7 +48,8 @@ def get_messages(
 def create_message(
     message_data: MessageCreate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(require_public_interactions_enabled),
 ):
     """发布留言"""
     try:

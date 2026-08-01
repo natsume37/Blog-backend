@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 
 
@@ -10,6 +10,8 @@ class SiteStats(BaseModel):
 
 
 class SiteConfig(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     # Site Info
     siteName: str
     siteDescription: str
@@ -30,7 +32,7 @@ class SiteConfig(BaseModel):
     
     
     # Message Board Banners (留言页面背景图列表)
-    messageBoardBanners: List[str] = []
+    messageBoardBanners: List[str] = Field(default_factory=list)
     messageBoardTitle: str = "弹幕"  # 留言板标题
     
     # Danmaku Settings
@@ -39,10 +41,6 @@ class SiteConfig(BaseModel):
     danmakuFontSize: int = 14  # 弹幕字体大小
     danmakuInterval: int = 1200  # 弹幕生成间隔 (毫秒)
     
-    class Config:
-        from_attributes = True
-
-
 class MailConfig(BaseModel):
     smtpHost: str
     smtpPort: int
@@ -67,6 +65,6 @@ class MailTestPayload(BaseModel):
 
 
 class CommentRiskConfig(BaseModel):
-    sensitiveWords: List[str] = []
-    blockedIps: List[str] = []
+    sensitiveWords: List[str] = Field(default_factory=list)
+    blockedIps: List[str] = Field(default_factory=list)
     autoRejectEnabled: bool = False

@@ -219,6 +219,7 @@ def list_mcp_tools():
 @router.post("/mcp/call", response_model=ResponseModel[MCPToolCallResponse])
 def call_mcp_tool(
     payload: MCPToolCallRequest,
+    _: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):

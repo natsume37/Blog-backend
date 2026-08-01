@@ -16,7 +16,26 @@ from app.models.monitor import VisitLog
 
 from app.core.config import settings
 from app.core.logger import setup_logging
-from app.routers import auth, articles, categories, messages, site, users, monitor, comments, changelog, upload, resources, ai, audit_logs, login_logs, friend_links, tool_items, plugins, wechat, records
+from app.routers import (
+    ai,
+    articles,
+    audit_logs,
+    auth,
+    categories,
+    changelog,
+    friend_links,
+    login_logs,
+    monitor,
+    plugins,
+    records,
+    resources,
+    site,
+    tool_items,
+    upload,
+    users,
+    wechat,
+)
+from app.routers.v2 import records as records_v2
 from app.tasks import start_scheduler, stop_scheduler
 
 # Setup logging
@@ -165,8 +184,8 @@ async def referer_guard(request: Request, call_next):
     if not settings.ENABLE_REFERER_CHECK or "*" in settings.CORS_ORIGINS:
         return await call_next(request)
         
-    # Check only API v1 requests
-    if request.url.path.startswith(settings.API_V1_PREFIX):
+    # 两个 API 版本使用相同的来源校验策略。
+    if request.url.path.startswith((settings.API_V1_PREFIX, settings.API_V2_PREFIX)):
         referer = request.headers.get("referer")
         if referer:
             # Check if referer matches any allowed origin
@@ -190,7 +209,7 @@ async def log_visit(request: Request, call_next):
     process_time = time.time() - start_time
     
     # Only log API requests, exclude OPTIONS and static files if any
-    if request.url.path.startswith(settings.API_V1_PREFIX) and request.method != "OPTIONS":
+    if request.url.path.startswith((settings.API_V1_PREFIX, settings.API_V2_PREFIX)) and request.method != "OPTIONS":
         # Exclude admin/monitor APIs to avoid noise
         if "/monitor/" not in request.url.path and "/admin/" not in request.url.path:
             ip = get_client_ip(request)
@@ -224,11 +243,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(articles.router, prefix=settings.API_V1_PREFIX)
 app.include_router(categories.router, prefix=settings.API_V1_PREFIX)
-app.include_router(messages.router, prefix=settings.API_V1_PREFIX)
 app.include_router(site.router, prefix=settings.API_V1_PREFIX)
 app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 app.include_router(monitor.router, prefix=settings.API_V1_PREFIX)
-app.include_router(comments.router, prefix=settings.API_V1_PREFIX)
 app.include_router(changelog.router, prefix=settings.API_V1_PREFIX)
 app.include_router(upload.router, prefix="/api/v1")
 app.include_router(resources.router, prefix="/api/v1")
@@ -239,6 +256,7 @@ app.include_router(friend_links.router, prefix="/api/v1")
 app.include_router(tool_items.router, prefix="/api/v1")
 app.include_router(plugins.router, prefix="/api/v1")
 app.include_router(records.router, prefix="/api/v1")
+app.include_router(records_v2.router, prefix=settings.API_V2_PREFIX)
 app.include_router(wechat.router)
 
 

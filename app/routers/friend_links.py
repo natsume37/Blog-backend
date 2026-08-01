@@ -5,7 +5,7 @@ from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_admin
+from app.core.deps import get_current_admin, require_public_interactions_enabled
 from app.models.friend_link import FriendLink
 from app.models.user import User
 from app.schemas.common import ResponseModel
@@ -80,7 +80,11 @@ def get_friend_links(
 
 
 @router.post("/apply", response_model=ResponseModel[FriendLinkAdminSchema])
-def apply_friend_link(payload: FriendLinkApply, db: Session = Depends(get_db)):
+def apply_friend_link(
+    payload: FriendLinkApply,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_public_interactions_enabled),
+):
     data = _sanitize_base(payload)
     if not data["name"] or not data["url"]:
         return ResponseModel(code=400, msg="站点名称和链接不能为空")

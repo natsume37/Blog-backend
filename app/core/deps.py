@@ -48,6 +48,8 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id_int).first()
     if user is None:
         raise credentials_exception
+    if settings.OWNER_ONLY_MODE and not user.is_admin:
+        raise credentials_exception
         
     return user
 
@@ -76,6 +78,8 @@ def get_optional_current_user(
         return None
 
     user = db.query(User).filter(User.id == user_id_int).first()
+    if user is not None and settings.OWNER_ONLY_MODE and not user.is_admin:
+        return None
     return user
 
 
@@ -100,3 +104,13 @@ def get_current_admin(
             status_code=status.HTTP_403_FORBIDDEN, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+def require_public_interactions_enabled() -> None:
+    """统一阻止公开站点的主动写入入口。"""
+    if settings.PUBLIC_INTERACTIONS_ENABLED:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="公开站点处于只读模式",
+    )

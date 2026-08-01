@@ -1,6 +1,6 @@
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class MessageBase(BaseModel):
@@ -15,13 +15,11 @@ class MessageCreate(MessageBase):
 
 
 class MessageResponse(MessageBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: Optional[datetime] = None
     parent_id: Optional[int] = None
-
-    class Config:
-        from_attributes = True
-
 
 class CommentBase(BaseModel):
     content: str
@@ -36,10 +34,9 @@ class CommentCreate(CommentBase):
 
 
 class CommentResponse(CommentBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     article_id: int
     created_at: Optional[datetime] = None
     parent_id: Optional[int] = None
-
-    class Config:
-        from_attributes = True
